@@ -3,6 +3,10 @@
 *Analyse d.d. 6 augustus 2026, op basis van de volledige codebase, de testsuite
 (41/41 groen) en de GitHub Actions-logs van de afgelopen dag.*
 
+> **Uitvoeringsstatus — sprint 1 en 2 verwerkt (6 augustus 2026).**
+> Zie §7 onderaan voor wat er is gebouwd, wat er is geverifieerd en wat er
+> per taak nog openstaat. Sprint 3 en 4 zijn nog niet begonnen.
+
 ---
 
 ## 1. Managementsamenvatting
@@ -310,3 +314,50 @@ plan (± 70% van de taken).
 5. **Niets invullen zonder bron** bij E4-3 — een gedocumenteerd gat is beter
    dan een verzonnen tarief (het bestaande commentaar in `excise.yaml` zegt
    dit al; het blijft de regel).
+
+---
+
+## 7. Uitvoeringsstatus
+
+*Bijgewerkt 6 augustus 2026, na verwerking van sprint 1 en 2.*
+
+### Sprint 1 — site betrouwbaar live, geen dag historie meer verliezen
+
+| Taak | Status | Bewijs / toelichting |
+|---|---|---|
+| E1-1 Pages ontstoppen | ⛔ **geblokkeerd — actie repo-eigenaar** | Diagnose bevestigd op run `31110887125`: de push naar `gh-pages` triggert GitHubs eigen *pages build and deployment*, die intern `deploy-pages` draait en op precies dezelfde `deployment_in_progress` blijft hangen tot de timeout. Beide routes eindigen dus in dezelfde vastgelopen deployment. Dit is niet vanuit de workflow op te lossen; het stappenplan staat nu in de README (Pages-bron controleren, hangende deployment in de `github-pages`-environment cancelen, protection rules controleren, anders andere hosting). |
+| E1-2 Healthcheck na publicatie | ✅ | `.github/scripts/verify_published.py` pollt de live `forecast.json` (cache-busting querystring) tot `generated_at` gelijk is aan de zojuist gebouwde waarde, max. 5 min. Laatste stap van `daily.yml`. **Zolang E1-1 openstaat gaat de dagelijkse run hierop rood** — dat is de bedoeling: een groene run die niets publiceert is precies waarom dit een dag onopgemerkt bleef. |
+| E1-3 Hosting-fallback beslissen | ◻️ open | Beslistaak, wacht op de uitkomst van E1-1. Voorwerk staat in de README: Netlify/Cloudflare Pages, drie statische bestanden, geen bouwstap. |
+| E2-1 Stapvolgorde `daily.yml` | ✅ | Scrape → commit+push van `gla_history.csv` staan nu vóór tests, build en publicatie. Alles wat daarna faalt kost geen adviesprijs meer. |
+| E2-2 Push-race oplossen | ✅ | `.github/scripts/commit-and-push.sh`, gebruikt door beide workflows: rebase op `origin/main` + 3 pogingen met verdubbelende backoff. Lokaal geverifieerd met een echte race (tussentijdse commit op main): push wordt geweigerd, rebaset, slaagt op poging 2, beide bestanden overleven. Ook de faalroute getest: 3 pogingen, dan exit 1 met een `::error`-annotatie. |
+| E2-3 Scrape-falen zichtbaar | ✅ | Bij een gefaalde snapshot opent de workflow een issue met label `scraper` en de volledige `diagnose()`-output; bestaat er al een open issue, dan komt er een commentaar bij in plaats van een tweede issue. |
+| E2-4 GLA-scraper live valideren | ⛔ **geblokkeerd — netwerkbeleid** | De sessie waarin dit is uitgevoerd komt niet buiten het proxybeleid (`unitedconsumers.com` en `josbez.github.io` geven beide 403 op CONNECT), dus de echte pagina is niet op te halen. Blijft staan; de eerste geslaagde `make snapshot` in Actions is meteen het bewijs. |
+
+### Sprint 2 — CI-keten robuust
+
+| Taak | Status | Bewijs / toelichting |
+|---|---|---|
+| E3-1 Dependencies pinnen | ✅ | `requirements.txt` staat op exacte versies, alle geverifieerd met een groene suite (57 tests). `.github/dependabot.yml` verhoogt ze wekelijks, wetenschappelijke stack gegroepeerd. **Extra, want anders werkt het pinnen niet:** de repo had geen enkele workflow op `pull_request`, dus een Dependabot-PR werd door niets getest — `.github/workflows/tests.yml` doet dat nu (suite + offline end-to-end run + controle dat synthetische output ook als synthetisch gelabeld blijft). |
+| E3-2 Retry/backoff marktbronnen | ✅ | 3 pogingen per provider, exponentiële backoff met jitter, daarna pas de volgende provider; een lege reeks telt als blokkade en gaat direct door (retryen helpt daar niet). Yahoo-window van `range=max` naar 6 maanden zodra er een cache is, met splice waarbij nieuwe rijen winnen op overlappende datums. `actions/cache` bewaart alleen de parquet-caches — nadrukkelijk niet `gla_history.csv`, want die staat in git en een teruggezette oude kopie zou een dag historie terugdraaien. |
+| E3-3 Tests in de dagelijkse run | ✅ | `pytest` staat in `daily.yml` vóór de build (en ná de adviesprijs-commit, zodat een rode test geen dag historie kost). |
+| E3-4 Hardening kleinvee | ✅ | B-11: `gla.load()` zit in `pipeline._advisory_history()`, dat degradeert naar een lege reeks — bewust *niet* in `gla.load()` zelf, want `record_today()` leest via diezelfde functie en zou de historie dan tot één regel afkappen. B-12: nieuwe `sources/cache.py` met een versheidsregel van 12 uur voor CBS én markt; mislukt de CBS-verversing, dan wordt de oude cache gebruikt met een luide melding in plaats van door te vallen naar synthetische data. |
+
+### Testsuite
+
+41 → **57 tests**, allemaal groen. Nieuw: retry-gedrag (inclusief dat de
+backoff groeit en dat een lege reeks níét geretryd wordt), het splicen van de
+marktcache en de top-up-route door `fetch()` heen, de versheidsregel, de
+begrensde CBS-cache-fallback, en dat een kapotte adviesprijs-historie nog
+steeds een forecast oplevert.
+
+Buiten pytest om geverifieerd: de push-race (echte tweede commit op `main` →
+rebase → geslaagd op poging 2) en de healthcheck (exit 0 bij een passende
+`generated_at`, exit 1 met `::error` bij een verouderde site).
+
+### Wat expliciet níét is gedaan
+
+Sprint 3 (E4-1 t/m E4-6, modelkwaliteit) en sprint 4 (E5-1 t/m E5-5, UX) zijn
+niet aangeraakt. Voor de twee zwaarste daarvan — de markt-timing (B-08) en de
+GLA-offset (B-07) — geldt bovendien dat ze pas af zijn als de backtest opnieuw
+is gedraaid en de nieuwe, waarschijnlijk iets lagere cijfers zijn gecommit. Dat
+vereist live CBS- en marktdata, en dus een omgeving die daar wél bij kan.

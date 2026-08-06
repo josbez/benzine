@@ -67,17 +67,46 @@ through the Pages deployment API. Set **Settings → Pages → Source: Deploy
 from a branch → `gh-pages` / `(root)`** once, after the first run has
 created the branch.
 
-The API route (`configure-pages` / `upload-pages-artifact` /
-`deploy-pages`) was tried first and abandoned. It repeatedly created a
-deployment and then sat on `deployment_in_progress` indefinitely — nothing
-fixable from this side while we depended on it. A branch push uses Pages'
-other serving path, so a stall in the deployment API cannot block it, and
-it is less machinery besides: no artifact, no environment, no deployment
-to poll.
-
 The branch is force-pushed as a single commit each time. It holds
 generated output only, so its history is worth nothing and letting it grow
 would cost clone time forever.
+
+### Pages does not currently work, and it is not the code
+
+The API route (`configure-pages` / `upload-pages-artifact` /
+`deploy-pages`) was tried first: it repeatedly created a deployment and
+then sat on `deployment_in_progress` until it timed out. Switching to a
+branch push was expected to sidestep that. **It did not.** Pushing to
+`gh-pages` triggers GitHub's own *pages build and deployment* workflow,
+which runs `deploy-pages` internally and stalls in exactly the same place
+(run `31110887125`). Both routes end in the same stuck deployment, and
+`https://josbez.github.io/benzine/` has never served anything.
+
+So this is a Pages configuration problem on the repository, not something
+the workflow can route around. To clear it:
+
+1. Check **Settings → Pages** — with a branch push the source must be
+   *Deploy from a branch*, not *GitHub Actions*. A mismatch here produces
+   precisely this symptom.
+2. Cancel any deployment stuck in the `github-pages` environment
+   (`gh api repos/josbez/benzine/deployments` → `POST .../statuses` with
+   `state=inactive`, or delete them), then re-run the daily workflow.
+3. Check whether `github-pages` has environment protection rules waiting
+   on an approval nobody is giving.
+4. If none of that clears it, publish `web/` to Netlify or Cloudflare
+   Pages instead — the site is three static files and one JSON, so the
+   hosting choice carries no weight.
+
+The daily run now ends with a healthcheck that polls the live
+`forecast.json` until it carries the `generated_at` of the build that just
+ran, and fails otherwise. Until the above is sorted the workflow will
+therefore go red every day — deliberately, because the alternative is a
+green run publishing to a site nobody is serving. The advisory price is
+committed long before that step, so a red run no longer costs any data.
+
+The branch push is kept regardless: it is less machinery than the artifact
+route (no artifact, no environment, no deployment to poll), which is a
+reason to prefer it but was never a reason to expect it to fix the stall.
 
 Two things worth knowing:
 
@@ -85,7 +114,9 @@ Two things worth knowing:
   public archive, so `data/raw/gla_history.csv` is committed back to the
   repo on each run and grows one row per day. Miss a day and that day is
   gone for good — which is the main reason to deploy this sooner rather
-  than later.
+  than later. The scrape and its commit are therefore the *first* steps of
+  the job, ahead of everything that is allowed to fail; a failed scrape
+  opens an issue rather than logging a warning nobody reads.
 - **CI runs `--source live`, never `auto`.** If a feed is down the build
   goes red instead of quietly publishing a synthetic forecast as if it were
   real. The offline fallback is for development only.
@@ -152,11 +183,19 @@ RBOB stands in for the real EBOB Rotterdam assessment, which is a paid
 Argus/Platts product. Swapping in a licensed EBOB feed means changing
 `sources/market.py` and nothing else.
 
-Each market series is tried against Yahoo Finance first and Stooq second.
-That redundancy is not paranoia: Stooq serves a block page rather than CSV
-to datacentre IP ranges, so it works from a laptop and fails from a GitHub
-runner — and a single provider is a single point of failure for the whole
-daily job.
+Each market series is tried against Yahoo Finance first and Stooq second,
+and each provider is retried three times with exponential backoff before
+the next one is tried. That redundancy is not paranoia: Stooq serves a
+block page rather than CSV to datacentre IP ranges, so it works from a
+laptop and fails from a GitHub runner — and a single provider is a single
+point of failure for the whole daily job.
+
+The full history is downloaded once and cached; later runs ask Yahoo for a
+six-month window and splice it over the cache, with freshly fetched rows
+winning on overlapping dates so revisions are picked up. Asking for twenty
+years of ticks every morning is both wasteful and a good way to earn a
+rate limit. The caches expire after twelve hours, so a local run cannot
+quietly keep using whatever it first downloaded.
 
 One known weakness in the proxy: `RB=F` is the **continuous front-month**
 RBOB contract, so it carries a discontinuity at every roll. RBOB rolls are

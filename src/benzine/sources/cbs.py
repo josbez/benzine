@@ -9,14 +9,26 @@ is modelled explicitly here in `publication_date`.
 """
 from __future__ import annotations
 
-import io
+import datetime as dt
 
 import pandas as pd
 import requests
 
 from ..config import CBS_BASE, CBS_TABLE, RAW
+from . import cache as cache_policy
 
 _TIMEOUT = 60
+
+# CBS releases weekly, so a cache written today holds everything published.
+# Anything older gets re-downloaded: a cache that never expires turns a
+# local run into a run against whatever prices happened to be current the
+# first time the table was fetched.
+_MAX_CACHE_AGE = dt.timedelta(hours=12)
+
+# How stale the cache may be before a failed refresh becomes a hard error
+# rather than a fallback. One CBS release cycle: past this we would be
+# missing a publication, not merely repeating one.
+_MAX_FALLBACK_AGE = dt.timedelta(days=7)
 
 
 def publication_date(observation_date: pd.Timestamp) -> pd.Timestamp:
@@ -44,9 +56,30 @@ def publication_date(observation_date: pd.Timestamp) -> pd.Timestamp:
 def fetch(force: bool = False) -> pd.DataFrame:
     """Download the full daily price table, caching the raw payload."""
     cache = RAW / f"cbs_{CBS_TABLE}.parquet"
-    if cache.exists() and not force:
+    if not force and cache_policy.is_fresh(cache, _MAX_CACHE_AGE):
         return pd.read_parquet(cache)
 
+    try:
+        df = _download()
+    except Exception as exc:  # noqa: BLE001 - a recent table beats no table
+        # Stale prices are still real prices, and the age of the newest one
+        # is carried through to the UI as `staleness_days`. Failing here
+        # instead would, under `--source auto`, fall through to the
+        # synthetic generator: numbers that are not prices at all.
+        #
+        # Bounded, though. Past a release cycle we are no longer absorbing
+        # an outage, we are quietly serving a table that is missing a
+        # publication -- and that should be a red run.
+        if not cache_policy.is_fresh(cache, _MAX_FALLBACK_AGE):
+            raise
+        print(f"  CBS refresh failed ({type(exc).__name__}: {exc}); using the cache")
+        return pd.read_parquet(cache)
+
+    df.to_parquet(cache, index=False)
+    return df
+
+
+def _download() -> pd.DataFrame:
     url = f"{CBS_BASE}/{CBS_TABLE}/TypedDataSet?$format=json"
     rows: list[dict] = []
     while url:
@@ -56,10 +89,7 @@ def fetch(force: bool = False) -> pd.DataFrame:
 
     if not rows:
         raise RuntimeError(f"CBS returned no rows for table {CBS_TABLE}")
-
-    df = _normalise(pd.DataFrame(rows))
-    df.to_parquet(cache, index=False)
-    return df
+    return _normalise(pd.DataFrame(rows))
 
 
 def _normalise(raw: pd.DataFrame) -> pd.DataFrame:

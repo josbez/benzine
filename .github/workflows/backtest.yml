@@ -41,17 +41,12 @@ jobs:
       - name: Walk-forward backtest
         run: PYTHONPATH=src python -m benzine backtest --source live --refit-every 60
 
+      # Monday 04:00 and the daily run's 05:00 are close enough together,
+      # and this job long enough, that the two regularly try to push at the
+      # same time. The helper rebases and retries rather than losing a run's
+      # worth of work to "fetch first".
       - name: Commit refreshed scores
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # Stage first, then compare against the index: on the very first
-          # run the file is untracked, and `git diff` alone does not see
-          # untracked files -- so the initial scores would never land.
-          git add data/backtest_metrics.json
-          if git diff --cached --quiet; then
-            echo "scores unchanged"
-            exit 0
-          fi
-          git commit -m "Refresh backtest scores"
-          git push
+          .github/scripts/commit-and-push.sh \
+            data/backtest_metrics.json \
+            "Refresh backtest scores"

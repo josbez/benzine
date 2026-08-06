@@ -36,21 +36,41 @@ def load_inputs(source: str = "auto") -> tuple[pd.DataFrame, pd.DataFrame, pd.Da
     The chosen source is returned and propagated all the way to the UI --
     a forecast built on synthetic data must never be presented as real.
     """
+    advisory = _advisory_history()
+
     if source == "synthetic":
         pump, mkt = synthetic.generate()
-        return pump, mkt, gla.load(), "synthetic"
+        return pump, mkt, advisory, "synthetic"
 
     try:
         pump = cbs.fetch()
         mkt = market.fetch()
-        return pump, mkt, gla.load(), "live"
+        return pump, mkt, advisory, "live"
     except Exception as exc:  # noqa: BLE001 - any failure means fall back
         if source == "live":
             raise
         print(f"  live sources unavailable ({type(exc).__name__}: {exc})")
         print("  falling back to synthetic data")
         pump, mkt = synthetic.generate()
-        return pump, mkt, gla.load(), "synthetic"
+        return pump, mkt, advisory, "synthetic"
+
+
+def _advisory_history() -> pd.DataFrame:
+    """The GLA history, or an empty frame if the file cannot be read.
+
+    A damaged history file must not be able to stop a forecast: the anchor
+    it feeds is an optional refinement, and without it the pipeline simply
+    falls back to the CBS anchor. This is deliberately *not* done inside
+    ``gla.load()`` -- ``record_today()`` reads through the same function and
+    then writes the file back, so a tolerant load there would quietly
+    truncate the history to a single row.
+    """
+    try:
+        return gla.load()
+    except Exception as exc:  # noqa: BLE001 - degrade to the CBS anchor
+        print(f"  advisory-price history unreadable ({type(exc).__name__}: {exc})")
+        print("  continuing with the CBS anchor only")
+        return pd.DataFrame(columns=["date", "gla_euro95"])
 
 
 def build(source: str = "auto") -> tuple[pd.DataFrame, pd.DataFrame, str]:

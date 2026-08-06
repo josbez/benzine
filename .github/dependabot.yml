@@ -1,0 +1,25 @@
+version: 2
+
+# requirements.txt is pinned to exact versions, so upgrades have to come
+# from somewhere: this is that somewhere. Each proposal runs the test suite
+# before it can be merged, which is the point -- the same freshness as
+# unpinned dependencies, with the breakage arriving in a pull request
+# instead of in Thursday morning's scheduled run.
+updates:
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: tuesday   # after Monday's backtest, well before the next one
+    open-pull-requests-limit: 3
+    groups:
+      # One pull request for the scientific stack: pandas, numpy and
+      # scikit-learn are upgraded against each other in practice, and
+      # reviewing them separately mostly produces conflicts.
+      scientific:
+        patterns: ["pandas", "numpy", "scikit-learn", "pyarrow"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly

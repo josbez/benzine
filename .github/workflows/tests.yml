@@ -1,0 +1,51 @@
+name: Tests
+
+# The other two workflows run on a schedule, which means a pull request --
+# a Dependabot upgrade, most of all -- could be merged without anything
+# having run the suite. Pinning the dependencies only helps if something
+# tests the proposed unpinning, and this is that something. It takes about
+# ten seconds and touches no network.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - run: PYTHONPATH=src python -m pytest tests/ -q
+
+      # The offline end-to-end run: builds a panel, backtests and writes a
+      # forecast.json without touching a single external service. A change
+      # that breaks the pipeline but not a unit test gets caught here.
+      - name: End-to-end run on synthetic data
+        run: PYTHONPATH=src python -m benzine all --source synthetic --refit-every 90
+
+      # A synthetic forecast presented as real would be the worst bug this
+      # project could ship, and it would look completely normal in the UI.
+      - name: Synthetic output stays labelled as synthetic
+        run: |
+          python - <<'PY'
+          import json
+          payload = json.load(open("web/forecast.json"))
+          assert payload["data_source"] == "synthetic", payload["data_source"]
+          print("labelled", payload["data_source"])
+          PY

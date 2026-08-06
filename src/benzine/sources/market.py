@@ -7,23 +7,42 @@ for a prototype: both are refined-gasoline cracks off the same crude barrel.
 Swap `SERIES` for a real EBOB feed if you have a licence -- nothing
 downstream needs to change.
 
-Each series is tried against several providers in turn. That is not
-belt-and-braces: free market data is exactly the kind of dependency that
-answers fine from a laptop and returns a block page from a cloud runner,
-which is what stooq does from GitHub's Azure ranges. One provider is a
-single point of failure for the entire daily job.
+Each series is tried against several providers in turn, and each provider
+is tried several times. That is not belt-and-braces: free market data is
+exactly the kind of dependency that answers fine from a laptop and returns
+a block page from a cloud runner, which is what stooq does from GitHub's
+Azure ranges. One provider is a single point of failure for the entire
+daily job -- and since a failed job also costs a day of advisory-price
+history, a single network hiccup used to be permanently expensive.
 """
 from __future__ import annotations
 
 import io
+import random
+import time
 
 import pandas as pd
 import requests
 
 from ..config import RAW
+from . import cache as cache_policy
 
 _TIMEOUT = 60
 _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; benzine-forecaster/0.1)"}
+
+# Per provider, not per series: a provider that answers a block page will
+# answer it again, so the retries are there for transient faults (timeouts,
+# 5xx, a truncated response) and hand over to the next provider quickly.
+_ATTEMPTS = 3
+_BACKOFF = 2.0  # seconds before the second attempt, doubled after that
+_JITTER = 0.5   # fraction of the delay drawn at random, to avoid lockstep
+
+# Yahoo accepts a range; asking for twenty years of history every morning is
+# both wasteful and a good way to get rate-limited. With a cache in hand we
+# ask for a window instead, wide enough to survive a fortnight of failed
+# runs and any revisions inside it.
+_FULL_RANGE = "max"
+_TOPUP_RANGE = "6mo"
 
 # Logical series -> (yahoo symbol, stooq symbol).
 SERIES = {
@@ -36,49 +55,93 @@ GALLONS_PER_LITRE = 1.0 / 3.785411784
 BARRELS_PER_LITRE = 1.0 / 158.987294928
 
 
+RAW_COLUMNS = list(SERIES)
+
+
 def fetch(force: bool = False) -> pd.DataFrame:
     """Daily market series, converted to EUR per litre where meaningful."""
     cache = RAW / "market.parquet"
-    if cache.exists() and not force:
-        return pd.read_parquet(cache)
+    # `force` means "start over": it discards the cached history rather
+    # than topping it up, which is the only way to repair a cache that has
+    # gone bad without deleting files by hand.
+    cached = pd.read_parquet(cache) if cache.exists() and not force else None
+
+    if cached is not None and cache_policy.is_fresh(cache):
+        return cached
+
+    # The full history is downloaded once; after that we only ask for a
+    # recent window and splice it onto what we already have. CBS pump
+    # prices go back to 2006 and any market history shorter than that is
+    # training data thrown away for nothing -- but that argues for keeping
+    # the history, not for re-downloading it every morning.
+    window = _FULL_RANGE if cached is None else _TOPUP_RANGE
 
     frames = {}
     for name, (yahoo_symbol, stooq_symbol) in SERIES.items():
-        frames[name] = _first_working(name, yahoo_symbol, stooq_symbol)
+        frames[name] = _first_working(name, yahoo_symbol, stooq_symbol, window)
 
-    df = pd.concat(frames, axis=1)
-    df.columns = list(frames)
-    df = df.sort_index()
+    fresh = pd.concat(frames, axis=1)
+    fresh.columns = list(frames)
 
-    # Markets are shut at weekends; the pump is not. Carry the last close
-    # forward so every calendar day has a price.
-    df = df.reindex(pd.date_range(df.index.min(), df.index.max(), freq="D")).ffill()
-    df.index.name = "date"
-
-    df["rbob_eur_l"] = df["rbob"] * GALLONS_PER_LITRE / df["eurusd"]
-    df["brent_eur_l"] = df["brent"] * BARRELS_PER_LITRE / df["eurusd"]
-
-    out = df.reset_index()
+    out = _derive(_splice(cached, fresh))
     out.to_parquet(cache, index=False)
     return out
 
 
-def _first_working(name: str, yahoo_symbol: str, stooq_symbol: str) -> pd.Series:
+def _splice(cached: pd.DataFrame | None, fresh: pd.DataFrame) -> pd.DataFrame:
+    """Lay a freshly fetched window over the cached history.
+
+    Newly fetched rows win on overlapping dates: providers do revise a
+    close after the fact, and the window is fetched precisely to pick those
+    revisions up.
+    """
+    if cached is None:
+        return fresh.sort_index()
+
+    old = cached.set_index("date")[RAW_COLUMNS]
+    combined = pd.concat([old, fresh.reindex(columns=RAW_COLUMNS)])
+    combined = combined[~combined.index.duplicated(keep="last")]
+    return combined.sort_index()
+
+
+def _derive(raw: pd.DataFrame) -> pd.DataFrame:
+    """Fill the calendar and convert to euro per litre."""
+    # Markets are shut at weekends; the pump is not. Carry the last close
+    # forward so every calendar day has a price.
+    df = raw.reindex(pd.date_range(raw.index.min(), raw.index.max(), freq="D")).ffill()
+    df.index.name = "date"
+
+    df["rbob_eur_l"] = df["rbob"] * GALLONS_PER_LITRE / df["eurusd"]
+    df["brent_eur_l"] = df["brent"] * BARRELS_PER_LITRE / df["eurusd"]
+    return df.reset_index()
+
+
+def _first_working(
+    name: str, yahoo_symbol: str, stooq_symbol: str, window: str = _FULL_RANGE
+) -> pd.Series:
     """Fetch one series, trying each provider and reporting what happened."""
     attempts = (("yahoo", _yahoo, yahoo_symbol), ("stooq", _stooq, stooq_symbol))
     failures = []
 
     for provider, fn, symbol in attempts:
-        try:
-            series = fn(symbol)
-        except Exception as exc:  # noqa: BLE001 - try the next provider
-            failures.append(f"{provider}({symbol}): {type(exc).__name__}: {exc}")
-            continue
-        if series.empty:
-            failures.append(f"{provider}({symbol}): empty series")
-            continue
-        print(f"    {name}: {len(series)} rows from {provider}")
-        return series
+        for attempt in range(1, _ATTEMPTS + 1):
+            try:
+                series = fn(symbol, window)
+            except Exception as exc:  # noqa: BLE001 - retry, then next provider
+                failures.append(
+                    f"{provider}({symbol}) try {attempt}: {type(exc).__name__}: {exc}"
+                )
+            else:
+                if not series.empty:
+                    print(f"    {name}: {len(series)} rows from {provider}")
+                    return series
+                # An empty series is a valid HTTP response with nothing in
+                # it -- a blocked symbol, not a transient fault. Retrying
+                # only burns time, so hand over to the next provider.
+                failures.append(f"{provider}({symbol}) try {attempt}: empty series")
+                break
+            if attempt < _ATTEMPTS:
+                _sleep_before_retry(attempt)
 
     raise RuntimeError(
         f"no provider returned data for {name!r}. Attempts:\n  "
@@ -86,14 +149,22 @@ def _first_working(name: str, yahoo_symbol: str, stooq_symbol: str) -> pd.Series
     )
 
 
-def _yahoo(symbol: str) -> pd.Series:
+def _sleep_before_retry(attempt: int) -> None:
+    """Exponential backoff with jitter.
+
+    The jitter matters more than it looks: all three series are fetched in
+    the same second from the same provider, so without it they retry in
+    lockstep and hit a rate limit together every time.
+    """
+    delay = _BACKOFF * 2 ** (attempt - 1)
+    time.sleep(delay * (1 + random.uniform(-_JITTER, _JITTER)))
+
+
+def _yahoo(symbol: str, window: str = _FULL_RANGE) -> pd.Series:
     """Daily closes from the Yahoo Finance chart endpoint."""
     url = (
         f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
-        # range=max, not a fixed window: CBS pump prices go back to 2006,
-        # and any market history shorter than that is training data thrown
-        # away for nothing.
-        "?range=max&interval=1d"
+        f"?range={window}&interval=1d"
     )
     response = requests.get(url, timeout=_TIMEOUT, headers=_HEADERS)
     response.raise_for_status()
@@ -111,8 +182,12 @@ def _yahoo(symbol: str) -> pd.Series:
     return series.dropna()
 
 
-def _stooq(symbol: str) -> pd.Series:
+def _stooq(symbol: str, window: str = _FULL_RANGE) -> pd.Series:
     """Daily closes from stooq's free CSV endpoint.
+
+    ``window`` is accepted and ignored: this endpoint has no range
+    parameter and always returns the full series. That costs nothing here,
+    because the caller splices whatever it gets onto the cached history.
 
     Note this is routinely blocked from datacentre IP ranges, in which case
     an HTML page comes back where the CSV should be.
