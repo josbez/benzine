@@ -28,6 +28,10 @@ from .sources.cbs import publication_date
 # Usable training rows (target observed) needed before a refit is attempted.
 MIN_TRAIN_ROWS = 200
 
+# Length of the out-of-sample evaluation window, in years. Training always
+# uses everything before each refit; this only bounds what is scored.
+TEST_YEARS = 5.0
+
 
 @dataclass
 class BacktestResult:
@@ -52,14 +56,29 @@ def walk_forward(
     model_name: str = "gbm",
     initial_train_days: int = 730,
     refit_every: int = 30,
+    test_years: float | None = TEST_YEARS,
 ) -> pd.DataFrame:
-    """Out-of-sample predictions for one model and horizon."""
+    """Out-of-sample predictions for one model and horizon.
+
+    ``test_years`` limits the evaluation to the most recent stretch of the
+    panel; training still expands over everything before each refit. The
+    limit exists for two reasons, and speed is the lesser one. The panel
+    reaches back to 2006, and how well the model would have done in 2008
+    says very little about how it does now -- different tax regime,
+    different retail structure, a fifth of the sample sitting in the 2008
+    and 2020 price collapses. A headline accuracy number averaged over
+    eighteen years mostly measures history.
+    """
     work = panel.copy()
     target_date = work["date"] + pd.Timedelta(days=horizon)
     work["target_known_at"] = target_date.map(publication_date)
     work = work.dropna(subset=[f"y_h{horizon}"]).reset_index(drop=True)
 
     start = work["date"].min() + pd.Timedelta(days=initial_train_days)
+    if test_years:
+        recent = work["date"].max() - pd.Timedelta(days=round(365.25 * test_years))
+        start = max(start, recent)
+
     test_origins = work[work["date"] >= start]
     if test_origins.empty:
         raise ValueError("not enough history for the requested training window")
