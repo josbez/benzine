@@ -15,7 +15,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from benzine.features import build_panel  # noqa: E402
-from benzine.sources import excise, synthetic  # noqa: E402
+from benzine.sources import excise, gla, synthetic  # noqa: E402
 from benzine.sources.cbs import publication_date  # noqa: E402
 
 
@@ -48,6 +48,44 @@ class TestExcise:
     def test_future_dates_carry_the_latest_known_rate(self):
         rate = excise.series(pd.DatetimeIndex(["2027-05-05"])).iloc[0]
         assert rate == pytest.approx(0.8447)
+
+
+class TestAdvisoryScraper:
+    """The live page cannot be reached from CI-less environments, so these
+    pin the parsing rules against markup shaped like the real thing."""
+
+    PAGE = """
+    <html><head><style>.p { color: red }</style>
+    <script>var lastPrice = "9,999";</script></head>
+    <body>
+      <nav><a href="/tanken/benzine">Benzine</a><a href="/tanken/diesel">Diesel</a></nav>
+      <h1>Gemiddelde landelijke adviesprijs</h1>
+      <table>
+        <tr><th>Brandstof</th><th>Prijs</th></tr>
+        <tr><td>Euro 95 (E10)</td><td>&euro;&nbsp;2,109</td></tr>
+        <tr><td>Diesel</td><td>&euro;&nbsp;1,879</td></tr>
+        <tr><td>LPG</td><td>&euro;&nbsp;0,999</td></tr>
+      </table>
+    </body></html>
+    """
+
+    def test_reads_the_euro95_price(self):
+        assert gla.scrape(self.PAGE) == pytest.approx(2.109)
+
+    def test_ignores_navigation_mentions_of_benzine(self):
+        """A menu link says "Benzine" long before the table does."""
+        assert gla.scrape(self.PAGE) != pytest.approx(1.879)
+
+    def test_ignores_prices_hidden_in_scripts(self):
+        assert "9,999" not in gla.to_text(self.PAGE)
+
+    def test_rejects_implausible_values(self):
+        assert gla.find_price("Euro 95 kost 9,99 per liter") is None
+
+    def test_error_shows_what_the_page_contained(self):
+        """Diagnosing a scrape failure from a log needs the page text."""
+        with pytest.raises(RuntimeError, match="Koekjes"):
+            gla.scrape("<html><body><h1>Koekjes accepteren</h1></body></html>")
 
 
 def pump_fixture() -> pd.DataFrame:
@@ -122,7 +160,9 @@ class TestAdvisoryAnchor:
         pump, market, gla = self._inputs()
         panel = build_panel(pump, market, gla)
         assert panel["anchor_is_gla"].mean() > 0.5
-        assert panel["staleness"].max() <= 2
+        # Once it takes over, the anchor is same-day rather than days stale.
+        # Earlier rows still sit on CBS while the offset is being estimated.
+        assert panel.loc[panel["anchor_is_gla"] == 1, "staleness"].max() <= 2
 
     def test_advisory_anchor_is_never_from_the_future(self):
         pump, market, gla = self._inputs()
@@ -139,6 +179,25 @@ class TestAdvisoryAnchor:
         bias = (settled["anchor"].to_numpy()
                 - truth.reindex(settled["anchor_date"]).to_numpy())
         assert abs(float(pd.Series(bias).mean())) < 0.01
+
+    def test_short_history_does_not_anchor_on_the_list_price(self):
+        """Day one of the scraper must not jump the displayed price.
+
+        The advisory price sits cents above the CBS average, so before the
+        offset is estimated the anchor has to stay on CBS.
+        """
+        from benzine.features import MIN_GLA_OVERLAP
+
+        pump, market, full_gla = self._inputs()
+        short = full_gla.tail(MIN_GLA_OVERLAP - 1)
+        panel = build_panel(pump, market, short)
+        assert panel["anchor_is_gla"].sum() == 0
+
+        truth = pump.set_index("date")["euro95"]
+        tail = panel.tail(5)
+        bias = (tail["anchor"].to_numpy()
+                - truth.reindex(tail["anchor_date"]).to_numpy())
+        assert abs(float(pd.Series(bias).mean())) < 1e-9
 
     def test_offset_uses_only_past_overlaps(self):
         """Truncating the future must not change past anchors."""

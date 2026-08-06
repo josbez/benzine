@@ -42,11 +42,17 @@ jobs:
       - run: pip install -r requirements.txt
 
       # There is no public archive of advisory prices, so the history is
-      # only as long as the number of days this job has run. Never fail the
-      # build over it: the pipeline falls back to the CBS anchor.
+      # only as long as the number of days this job has run. A failure here
+      # must not fail the build -- the pipeline falls back to the CBS anchor
+      # -- but it must be visible, because a silently broken scraper would
+      # cost a day of history every day until someone noticed.
       - name: Record today's advisory price
-        continue-on-error: true
-        run: make snapshot
+        run: |
+          if ! make snapshot; then
+            echo "::warning title=Advisory price not recorded::Scraping \
+          UnitedConsumers failed. The forecast falls back to the CBS anchor, \
+          but today's advisory price is lost permanently. See src/benzine/sources/gla.py."
+          fi
 
       # Deliberately --source live, not auto: if a feed is down we want a
       # red build, not a synthetic forecast quietly published as if real.
