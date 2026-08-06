@@ -62,10 +62,22 @@ They are split because the daily run takes well under a minute while the
 backtest takes several — and its scores barely move day to day. The daily
 job reads the cached scores from `data/backtest_metrics.json`.
 
-Before the first run, enable Pages once: **Settings → Pages → Source:
-GitHub Actions**. This cannot be automated — a workflow's `GITHUB_TOKEN`
-is not permitted to create a Pages site, so `configure-pages` with
-`enablement: true` fails with "Resource not accessible by integration".
+The site is published by pushing `web/` to a **`gh-pages`** branch, not
+through the Pages deployment API. Set **Settings → Pages → Source: Deploy
+from a branch → `gh-pages` / `(root)`** once, after the first run has
+created the branch.
+
+The API route (`configure-pages` / `upload-pages-artifact` /
+`deploy-pages`) was tried first and abandoned. It repeatedly created a
+deployment and then sat on `deployment_in_progress` indefinitely — nothing
+fixable from this side while we depended on it. A branch push uses Pages'
+other serving path, so a stall in the deployment API cannot block it, and
+it is less machinery besides: no artifact, no environment, no deployment
+to poll.
+
+The branch is force-pushed as a single commit each time. It holds
+generated output only, so its history is worth nothing and letting it grow
+would cost clone time forever.
 
 Two things worth knowing:
 

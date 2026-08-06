@@ -15,9 +15,7 @@ on:
       - ".github/workflows/daily.yml"
 
 permissions:
-  contents: write   # to append today's advisory price to the history
-  pages: write
-  id-token: write
+  contents: write   # advisory-price history, and the gh-pages branch
 
 # Never let two runs race on the advisory-price file.
 concurrency:
@@ -27,10 +25,6 @@ concurrency:
 jobs:
   forecast:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
-
     steps:
       - uses: actions/checkout@v4
 
@@ -79,14 +73,39 @@ jobs:
           git commit -m "Record advisory price for $(date -u +%Y-%m-%d)"
           git push
 
-      # No enablement: true here. It looks like it removes the manual
-      # setup step, but a workflow's GITHUB_TOKEN cannot create a Pages
-      # site -- "Resource not accessible by integration" -- so it only
-      # trades one failure for a more confusing one. Enabling Pages is a
-      # one-off owner action: Settings -> Pages -> Source: GitHub Actions.
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: web
-      - id: deploy
-        uses: actions/deploy-pages@v4
+      # Published by pushing to a branch rather than through the Pages
+      # deployment API (configure-pages / upload-pages-artifact /
+      # deploy-pages). That API repeatedly accepted a deployment and then
+      # sat on "deployment_in_progress" indefinitely -- nothing on our side
+      # to fix, and nothing on our side to work around either, as long as
+      # we depended on it.
+      #
+      # A branch push goes through Pages' other, older serving path, so a
+      # stall in the deployment API cannot block it. It is also simply less
+      # machinery: no artifact, no environment, no deployment to poll.
+      #
+      # The branch is rebuilt from a single commit each time. It holds
+      # generated output only, so its history is worth nothing and an
+      # ever-growing branch of published sites costs clone time forever.
+      - name: Publish site to gh-pages
+        run: |
+          site="$RUNNER_TEMP/site"
+          rm -rf "$site"
+          cp -r web "$site"
+          # Without this, Pages runs the files through Jekyll, which skips
+          # anything beginning with an underscore and adds a build step we
+          # have no use for.
+          touch "$site/.nojekyll"
+
+          cd "$site"
+          git init -q -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -qm "Publish forecast for $(date -u +%Y-%m-%d)"
+          git push -q --force \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            gh-pages
+          echo "published $(ls | tr '\n' ' ')"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
