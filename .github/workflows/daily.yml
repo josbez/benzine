@@ -79,13 +79,12 @@ jobs:
           git commit -m "Record advisory price for $(date -u +%Y-%m-%d)"
           git push
 
-      # enablement: true turns Pages on via the API rather than requiring
-      # someone to find Settings -> Pages -> Source: GitHub Actions first.
-      # Without it the whole run fails on a configuration step, after the
-      # forecast has already been built.
+      # No enablement: true here. It looks like it removes the manual
+      # setup step, but a workflow's GITHUB_TOKEN cannot create a Pages
+      # site -- "Resource not accessible by integration" -- so it only
+      # trades one failure for a more confusing one. Enabling Pages is a
+      # one-off owner action: Settings -> Pages -> Source: GitHub Actions.
       - uses: actions/configure-pages@v5
-        with:
-          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: web

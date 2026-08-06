@@ -62,10 +62,10 @@ They are split because the daily run takes well under a minute while the
 backtest takes several — and its scores barely move day to day. The daily
 job reads the cached scores from `data/backtest_metrics.json`.
 
-The daily workflow enables Pages itself on first run (`enablement: true`),
-so there is nothing to configure by hand. If your organisation restricts
-that, turn it on manually instead: **Settings → Pages → Source: GitHub
-Actions**.
+Before the first run, enable Pages once: **Settings → Pages → Source:
+GitHub Actions**. This cannot be automated — a workflow's `GITHUB_TOKEN`
+is not permitted to create a Pages site, so `configure-pages` with
+`enablement: true` fails with "Resource not accessible by integration".
 
 Two things worth knowing:
 
