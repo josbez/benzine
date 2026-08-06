@@ -161,9 +161,14 @@ tests/           timing and leakage guards
   output `data_source: synthetic`, which the web app surfaces as a warning
   banner. Backtest numbers on synthetic data verify the machinery; they say
   nothing about real-world accuracy.
-- **The GLA scraper is untested against the live page.** It parses HTML and
-  raises rather than guessing if the markup has changed — verify it on first
-  run.
+- **The GLA scraper is untested against the live page.** It parses the
+  page's text (tags stripped) and raises with an excerpt rather than
+  guessing, so a failure in CI shows what the page actually contained.
+- **The advisory price only becomes the anchor after ~10 overlapping days.**
+  It is a list price from the five majors while CBS is volume-weighted
+  across all stations including discounters, so the two sit cents apart.
+  Until that offset is estimated the anchor stays on CBS — otherwise the
+  displayed price would jump on the first day the scraper works.
 - **The 80% interval runs slightly narrow** on synthetic data (~77%
   coverage). Worth recalibrating on real data before trusting the band.
 - **National average only.** Per-station forecasting is the intended next

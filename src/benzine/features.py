@@ -28,6 +28,8 @@ from .sources import excise as excise_src
 _MARKET_WINDOWS = (1, 3, 7, 14)
 # Lags of recent observed pump changes.
 _PUMP_LAGS = (1, 2, 3, 5, 7)
+# Overlapping days needed before the advisory price may anchor a forecast.
+MIN_GLA_OVERLAP = 10
 
 
 def build_panel(
@@ -126,9 +128,19 @@ def _apply_gla_anchor(panel: pd.DataFrame, gla: pd.DataFrame) -> pd.DataFrame:
     )
 
     gap = merged["anchor"] - merged["gla_euro95"]
-    offset = gap.shift(1).rolling(60, min_periods=10).mean().fillna(0.0)
+    offset = gap.shift(1).rolling(60, min_periods=MIN_GLA_OVERLAP).mean()
 
-    fresh = merged["gla_euro95"].notna() & (merged["gla_date"] > merged["anchor_date"])
+    # Until that offset is estimated, the advisory price is not usable as an
+    # anchor at all. It is a list price from the five major brands, while CBS
+    # is a volume-weighted average that includes unmanned discounters, so the
+    # two sit cents apart. Adopting it uncorrected would visibly jump the
+    # displayed price on the first day the scraper runs -- which is exactly
+    # when nobody would recognise the jump as a bug.
+    fresh = (
+        merged["gla_euro95"].notna()
+        & (merged["gla_date"] > merged["anchor_date"])
+        & offset.notna()
+    )
     merged["anchor_is_gla"] = fresh.astype(int)
     merged.loc[fresh, "anchor"] = merged.loc[fresh, "gla_euro95"] + offset[fresh]
     merged.loc[fresh, "anchor_date"] = merged.loc[fresh, "gla_date"]

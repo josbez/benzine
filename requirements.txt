@@ -3,3 +3,5 @@ numpy>=1.24
 scikit-learn>=1.3
 requests>=2.31
 PyYAML>=6.0
+pyarrow>=14.0   # pandas needs it for the parquet caches
+pytest>=7.4     # the weekly workflow runs the test suite
