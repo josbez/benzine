@@ -62,8 +62,10 @@ They are split because the daily run takes well under a minute while the
 backtest takes several — and its scores barely move day to day. The daily
 job reads the cached scores from `data/backtest_metrics.json`.
 
-To turn it on: **Settings → Pages → Source: GitHub Actions**, then run
-*Daily forecast* once by hand from the Actions tab.
+The daily workflow enables Pages itself on first run (`enablement: true`),
+so there is nothing to configure by hand. If your organisation restricts
+that, turn it on manually instead: **Settings → Pages → Source: GitHub
+Actions**.
 
 Two things worth knowing:
 
@@ -134,6 +136,13 @@ That redundancy is not paranoia: Stooq serves a block page rather than CSV
 to datacentre IP ranges, so it works from a laptop and fails from a GitHub
 runner — and a single provider is a single point of failure for the whole
 daily job.
+
+One known weakness in the proxy: `RB=F` is the **continuous front-month**
+RBOB contract, so it carries a discontinuity at every roll. RBOB rolls are
+not small — the summer/winter blend switch puts a visible step into the
+series each spring and autumn. The model reads those steps as genuine
+wholesale moves. A real EBOB assessment has no such artefact, and until one
+is wired in, expect the roll months to be the model's worst.
 
 ## Models
 

@@ -79,7 +79,13 @@ jobs:
           git commit -m "Record advisory price for $(date -u +%Y-%m-%d)"
           git push
 
+      # enablement: true turns Pages on via the API rather than requiring
+      # someone to find Settings -> Pages -> Source: GitHub Actions first.
+      # Without it the whole run fails on a configuration step, after the
+      # forecast has already been built.
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: web
