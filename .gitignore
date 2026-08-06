@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+node_modules/
+
+# Downloaded and derived data -- regenerate with `make all`.
+data/raw/*.parquet
+data/processed/*.parquet
+web/forecast.json
+
+# The advisory-price history is append-only and slow to rebuild, so it is
+# deliberately NOT ignored: data/raw/gla_history.csv is worth committing.
+!data/raw/gla_history.csv

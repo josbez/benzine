@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Benzineprijs verwachting</title>
+<meta name="description" content="Verwachting van de landelijke Euro 95 pompprijs voor de komende 5 dagen.">
+<meta name="theme-color" content="#f9f9f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d0d0d" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>⛽</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Benzineprijs verwachting</h1>
+    <p class="sub" id="fuel-line">Euro 95 (E10) &middot; landelijk gemiddelde</p>
+    <div class="banner" id="synthetic-banner" hidden>
+      <strong>Demodata.</strong> Deze forecast draait op een synthetische reeks,
+      niet op echte marktdata. De cijfers tonen aan dat de pipeline werkt &mdash;
+      ze zeggen niets over de benzineprijs.
+    </div>
+  </header>
+
+  <section class="card">
+    <p class="hero-label" id="anchor-label">Laatst bekende prijs</p>
+    <p class="hero-value" id="hero">&mdash;<span class="unit"> /l</span></p>
+    <p class="hero-meta" id="anchor-meta"></p>
+  </section>
+
+  <section class="card">
+    <h2>Komende 5 dagen</h2>
+    <div class="chart-shell">
+      <svg class="chart" id="chart" role="img"
+           aria-label="Benzineprijs van de afgelopen weken en de verwachting voor de komende vijf dagen, met onzekerheidsband."></svg>
+      <div class="tooltip" id="tooltip" hidden></div>
+    </div>
+    <div class="legend">
+      <span><i class="key"></i>gemeten</span>
+      <span><i class="key dashed"></i>verwacht</span>
+      <span><i class="key band"></i>80% kans­interval</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Per dag</h2>
+    <div class="days" id="days"></div>
+    <p class="note" id="days-note"></p>
+  </section>
+
+  <section class="card">
+    <h2>Waar dit op gebaseerd is</h2>
+    <div class="drivers" id="drivers"></div>
+  </section>
+
+  <section class="card">
+    <h2>Hoe goed was dit model?</h2>
+    <table id="skill-table">
+      <thead>
+        <tr><th>Vooruit</th><th>Afwijking</th><th>Naïef</th><th>Beter</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <p class="note" id="skill-note"></p>
+  </section>
+
+  <footer id="footer"></footer>
+
+</div>
+<script src="app.js"></script>
+</body>
+</html>
