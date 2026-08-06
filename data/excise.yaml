@@ -1,0 +1,18 @@
+# Dutch excise duty (accijns) on Euro95 petrol, EUR per litre.
+#
+# Each entry is the rate that takes effect ON that date and stays in force
+# until the next entry. Because excise changes are announced weeks or months
+# in advance, future entries are legitimate forecast inputs: they are known,
+# deterministic jumps rather than something the model has to predict.
+#
+# Verify against the Belastingdienst tariff tables before relying on these
+# for anything beyond the prototype.
+euro95:
+  - date: 2022-04-01
+    rate: 0.65100   # temporary reduction ("accijnskorting")
+  - date: 2023-07-01
+    rate: 0.78900   # partially unwound, held flat through 2025
+  - date: 2026-01-01
+    rate: 0.84470   # reduction narrowed + indexation
+
+vat_rate: 0.21

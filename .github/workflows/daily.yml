@@ -1,0 +1,81 @@
+name: Daily forecast
+
+# Advisory prices for the coming day are published the evening before, and
+# CBS releases on Thursday mornings, so an early-morning run picks up both.
+# 05:00 UTC is 06:00 CET / 07:00 CEST.
+on:
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "src/**"
+      - ".github/workflows/daily.yml"
+
+permissions:
+  contents: write   # to append today's advisory price to the history
+  pages: write
+  id-token: write
+
+# Never let two runs race on the advisory-price file.
+concurrency:
+  group: daily-forecast
+  cancel-in-progress: false
+
+jobs:
+  forecast:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # There is no public archive of advisory prices, so the history is
+      # only as long as the number of days this job has run. Never fail the
+      # build over it: the pipeline falls back to the CBS anchor.
+      - name: Record today's advisory price
+        continue-on-error: true
+        run: make snapshot
+
+      # Deliberately --source live, not auto: if a feed is down we want a
+      # red build, not a synthetic forecast quietly published as if real.
+      - name: Build forecast
+        run: PYTHONPATH=src python -m benzine forecast --source live
+
+      - name: Commit advisory-price history
+        run: |
+          # The scrape is allowed to fail, so the file may not exist at all.
+          if [ ! -f data/raw/gla_history.csv ]; then
+            echo "no advisory-price history yet -- scrape likely failed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Stage first, then compare against the index: on the very first
+          # run the file is untracked, and `git diff` alone does not see
+          # untracked files -- so day one would never be recorded.
+          git add data/raw/gla_history.csv
+          if git diff --cached --quiet; then
+            echo "no new advisory price to store"
+            exit 0
+          fi
+          git commit -m "Record advisory price for $(date -u +%Y-%m-%d)"
+          git push
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+      - id: deploy
+        uses: actions/deploy-pages@v4
