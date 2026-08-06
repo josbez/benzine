@@ -44,6 +44,8 @@ def main() -> None:
         result.predictions.to_parquet(
             pipeline.PROCESSED / "backtest_predictions.parquet", index=False
         )
+        pipeline.save_metrics(metrics)
+        print("    -> data/backtest_metrics.json")
 
     if args.command in ("forecast", "all"):
         print("[3] publishing forecast")

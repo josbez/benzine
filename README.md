@@ -48,6 +48,39 @@ For real forecasts:
 make all      # fetches CBS + market data, backtests, writes web/forecast.json
 ```
 
+## Deploying it
+
+The whole thing is a static page plus one generated JSON file, so it needs
+no server. Two GitHub Actions workflows cover it, free:
+
+| Workflow | When | What |
+|---|---|---|
+| `daily.yml` | 05:00 UTC daily | scrape the advisory price, rebuild the forecast, publish to GitHub Pages |
+| `backtest.yml` | Mondays | re-run the walk-forward evaluation, commit the scores |
+
+They are split because the daily run takes well under a minute while the
+backtest takes several — and its scores barely move day to day. The daily
+job reads the cached scores from `data/backtest_metrics.json`.
+
+To turn it on: **Settings → Pages → Source: GitHub Actions**, then run
+*Daily forecast* once by hand from the Actions tab.
+
+Two things worth knowing:
+
+- **The daily run is what builds the advisory-price history.** There is no
+  public archive, so `data/raw/gla_history.csv` is committed back to the
+  repo on each run and grows one row per day. Miss a day and that day is
+  gone for good — which is the main reason to deploy this sooner rather
+  than later.
+- **CI runs `--source live`, never `auto`.** If a feed is down the build
+  goes red instead of quietly publishing a synthetic forecast as if it were
+  real. The offline fallback is for development only.
+
+GitHub delays scheduled workflows under load, and disables them entirely
+after 60 days without repository activity. The daily commit counts as
+activity, so this is self-sustaining as long as the advisory-price scrape
+keeps working — but if the site goes stale, check that first.
+
 ## The timing problem, and why it dominates the design
 
 CBS publishes daily pump prices **on Thursday, covering days through that

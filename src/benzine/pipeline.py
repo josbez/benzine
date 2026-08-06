@@ -6,12 +6,26 @@ import json
 
 import pandas as pd
 
-from .config import HORIZONS, PROCESSED, WEB
+from .config import HORIZONS, METRICS_FILE, PROCESSED, WEB
 from .features import build_panel
 from .model import MODELS
 from .sources import cbs, gla, market, synthetic
 
 HISTORY_DAYS = 120
+
+
+def save_metrics(metrics: pd.DataFrame) -> None:
+    METRICS_FILE.write_text(metrics.round(4).to_json(orient="records", indent=2))
+
+
+def load_metrics() -> pd.DataFrame | None:
+    """Backtest scores from the last evaluation run, if there is one."""
+    if not METRICS_FILE.exists():
+        return None
+    try:
+        return pd.read_json(METRICS_FILE)
+    except ValueError:
+        return None
 
 
 def load_inputs(source: str = "auto") -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, str]:
@@ -55,6 +69,9 @@ def publish_forecast(
     horizons: tuple[int, ...] = HORIZONS,
 ) -> dict:
     """Fit on all available history and write web/forecast.json."""
+    if metrics is None:
+        metrics = load_metrics()
+
     latest = panel.iloc[-1]
     anchor = float(latest["anchor"])
     origin = pd.Timestamp(latest["date"])
@@ -99,10 +116,8 @@ def publish_forecast(
         "forecast": rows,
         "model": model_name,
         "backtest": (
-            metrics[metrics["model"] == model_name]
-            .round(4)
-            .to_dict("records")
-            if metrics is not None
+            metrics[metrics["model"] == model_name].round(4).to_dict("records")
+            if metrics is not None and not metrics.empty
             else []
         ),
     }

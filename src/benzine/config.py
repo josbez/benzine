@@ -22,6 +22,12 @@ CBS_BASE = "https://opendata.cbs.nl/ODataApi/odata"
 # Fuel we forecast first. CBS codes these as "BenzineEuro95" style keys.
 FUEL_EURO95 = "euro95"
 
+# Backtest scores are expensive (minutes) and change slowly, so they are
+# computed on their own schedule and cached here for the daily run to read.
+# This file is committed -- it is a published accuracy claim, not a build
+# artefact.
+METRICS_FILE = DATA / "backtest_metrics.json"
+
 # Forecast horizons, in days. Beyond 5 days the known wholesale move has
 # fully passed through and we would be forecasting the oil market itself,
 # which is not predictable -- so we deliberately stop at 5.

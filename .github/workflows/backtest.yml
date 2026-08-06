@@ -1,0 +1,52 @@
+name: Weekly backtest
+
+# The walk-forward evaluation takes minutes and its scores barely move from
+# one day to the next, so it runs on its own schedule and caches the result
+# in data/backtest_metrics.json. The daily job just reads that file.
+on:
+  schedule:
+    - cron: "0 4 * * 1"   # Mondays, ahead of the week's runs
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: weekly-backtest
+  cancel-in-progress: false
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: PYTHONPATH=src python -m pytest tests/ -q
+
+      - name: Walk-forward backtest
+        run: PYTHONPATH=src python -m benzine backtest --source live
+
+      - name: Commit refreshed scores
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Stage first, then compare against the index: on the very first
+          # run the file is untracked, and `git diff` alone does not see
+          # untracked files -- so the initial scores would never land.
+          git add data/backtest_metrics.json
+          if git diff --cached --quiet; then
+            echo "scores unchanged"
+            exit 0
+          fi
+          git commit -m "Refresh backtest scores"
+          git push
