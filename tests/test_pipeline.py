@@ -50,6 +50,66 @@ class TestExcise:
         assert rate == pytest.approx(0.8447)
 
 
+class TestShortMarketHistory:
+    """The real feeds start years after CBS does.
+
+    That mismatch crashed the first live backtest: an early training window
+    fell entirely inside the era with no wholesale prices, every market
+    feature was missing at once, and the model was handed an empty matrix.
+    """
+
+    @staticmethod
+    def _inputs():
+        pump, mkt = synthetic.generate(start="2015-01-01", end="2024-12-31")
+        # Market data only from 2020 -- the shape of the live mismatch.
+        return pump, mkt[mkt["date"] >= "2020-01-01"].reset_index(drop=True)
+
+    def test_panel_starts_where_the_market_series_does(self):
+        pump, mkt = self._inputs()
+        panel = build_panel(pump, mkt)
+        assert panel["date"].min() >= pd.Timestamp("2020-01-01")
+        assert panel["margin"].notna().all()
+
+    def test_ecm_fits_despite_missing_features(self):
+        """Missing features must be imputed, never allowed to empty the set."""
+        from benzine.model import ECMForecaster
+
+        pump, mkt = self._inputs()
+        panel = build_panel(pump, mkt)
+        train = panel.copy()
+        train["mkt_up_7d"] = float("nan")  # one column entirely absent
+
+        model = ECMForecaster().fit(train, 2)
+        assert model.predict(panel.tail(5))["q50"].notna().all()
+
+    def test_fit_and_predict_agree_on_missing_values(self):
+        """predict used to zero-fill what fit had dropped."""
+        from benzine.model import ECMForecaster
+
+        pump, mkt = self._inputs()
+        panel = build_panel(pump, mkt)
+        model = ECMForecaster().fit(panel, 2)
+
+        complete = panel.dropna(subset=model.columns).tail(20)
+        gapped = complete.copy()
+        gapped.loc[gapped.index[0], "mkt_up_3d"] = float("nan")
+
+        # A single gap should nudge one prediction, not shift the rest.
+        base = model.predict(complete)["q50"].to_numpy()
+        with_gap = model.predict(gapped)["q50"].to_numpy()
+        assert (base[1:] == pytest.approx(with_gap[1:]))
+
+    def test_backtest_skips_windows_it_cannot_train_on(self):
+        from benzine import backtest as bt
+
+        pump, mkt = self._inputs()
+        panel = build_panel(pump, mkt)
+        preds = bt.walk_forward(panel, horizon=2, model_name="ecm",
+                                initial_train_days=400, refit_every=120)
+        assert len(preds) > 0
+        assert preds["q50"].notna().all()
+
+
 class TestMarketProviders:
     """Free market feeds answer fine from a laptop and return block pages
     from cloud runners, so the fallback path is the one that matters."""

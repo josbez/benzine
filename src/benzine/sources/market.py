@@ -90,7 +90,10 @@ def _yahoo(symbol: str) -> pd.Series:
     """Daily closes from the Yahoo Finance chart endpoint."""
     url = (
         f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
-        "?range=15y&interval=1d"
+        # range=max, not a fixed window: CBS pump prices go back to 2006,
+        # and any market history shorter than that is training data thrown
+        # away for nothing.
+        "?range=max&interval=1d"
     )
     response = requests.get(url, timeout=_TIMEOUT, headers=_HEADERS)
     response.raise_for_status()
