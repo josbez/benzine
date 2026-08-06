@@ -6,6 +6,7 @@ in production. These tests pin the timing rules down.
 """
 from __future__ import annotations
 
+import datetime as dt
 import sys
 from pathlib import Path
 
@@ -14,8 +15,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from benzine import pipeline  # noqa: E402
 from benzine.features import build_panel  # noqa: E402
-from benzine.sources import excise, gla, market, synthetic  # noqa: E402
+from benzine.sources import cache as cache_policy  # noqa: E402
+from benzine.sources import cbs, excise, gla, market, synthetic  # noqa: E402
 from benzine.sources.cbs import publication_date  # noqa: E402
 
 
@@ -216,30 +219,79 @@ class TestMarketProviders:
         idx = pd.date_range("2026-01-01", periods=n, freq="D")
         return pd.Series(range(n), index=idx, dtype=float)
 
+    @pytest.fixture(autouse=True)
+    def _no_waiting(self, monkeypatch):
+        """Record the backoff instead of sleeping through it."""
+        self.slept = []
+        monkeypatch.setattr(market.time, "sleep", self.slept.append)
+
     def test_falls_back_when_the_first_provider_fails(self, monkeypatch):
         monkeypatch.setattr(
             market, "_yahoo",
-            lambda s: (_ for _ in ()).throw(RuntimeError("blocked")),
+            lambda s, w=None: (_ for _ in ()).throw(RuntimeError("blocked")),
         )
-        monkeypatch.setattr(market, "_stooq", lambda s: self._series())
+        monkeypatch.setattr(market, "_stooq", lambda s, w=None: self._series())
         assert len(market._first_working("rbob", "RB=F", "rb.f")) == 3
 
     def test_falls_back_when_the_first_provider_returns_nothing(self, monkeypatch):
         """An empty series is a failure, not a valid answer."""
-        monkeypatch.setattr(market, "_yahoo", lambda s: pd.Series(dtype=float))
-        monkeypatch.setattr(market, "_stooq", lambda s: self._series())
+        monkeypatch.setattr(market, "_yahoo", lambda s, w=None: pd.Series(dtype=float))
+        monkeypatch.setattr(market, "_stooq", lambda s, w=None: self._series())
         assert len(market._first_working("rbob", "RB=F", "rb.f")) == 3
+
+    def test_retries_a_provider_before_giving_up_on_it(self, monkeypatch):
+        """One timeout used to cost a red run -- and, through the daily job,
+        a permanently lost day of advisory-price history."""
+        calls = []
+
+        def flaky(symbol, window=None):
+            calls.append(symbol)
+            if len(calls) < 2:
+                raise RuntimeError("connection reset")
+            return self._series()
+
+        monkeypatch.setattr(market, "_yahoo", flaky)
+        monkeypatch.setattr(
+            market, "_stooq",
+            lambda s, w=None: (_ for _ in ()).throw(AssertionError("never reached")),
+        )
+        assert len(market._first_working("rbob", "RB=F", "rb.f")) == 3
+        assert len(calls) == 2
+        assert len(self.slept) == 1
+
+    def test_backoff_grows_between_attempts(self, monkeypatch):
+        monkeypatch.setattr(
+            market, "_yahoo",
+            lambda s, w=None: (_ for _ in ()).throw(RuntimeError("down")),
+        )
+        monkeypatch.setattr(market, "_stooq", lambda s, w=None: self._series())
+        market._first_working("rbob", "RB=F", "rb.f")
+        assert len(self.slept) == market._ATTEMPTS - 1
+        assert self.slept[1] > self.slept[0]
+
+    def test_an_empty_answer_moves_on_instead_of_retrying(self, monkeypatch):
+        """A blocked symbol answers empty every time; retrying only delays
+        the handover to the provider that would have worked."""
+        calls = []
+        monkeypatch.setattr(
+            market, "_yahoo",
+            lambda s, w=None: (calls.append(s), pd.Series(dtype=float))[1],
+        )
+        monkeypatch.setattr(market, "_stooq", lambda s, w=None: self._series())
+        market._first_working("rbob", "RB=F", "rb.f")
+        assert len(calls) == 1
+        assert self.slept == []
 
     def test_reports_every_attempt_when_all_fail(self, monkeypatch):
         """The error has to name both providers, or diagnosing it from a CI
         log means guessing which one was even tried."""
         monkeypatch.setattr(
             market, "_yahoo",
-            lambda s: (_ for _ in ()).throw(RuntimeError("yahoo down")),
+            lambda s, w=None: (_ for _ in ()).throw(RuntimeError("yahoo down")),
         )
         monkeypatch.setattr(
             market, "_stooq",
-            lambda s: (_ for _ in ()).throw(RuntimeError("got HTML")),
+            lambda s, w=None: (_ for _ in ()).throw(RuntimeError("got HTML")),
         )
         with pytest.raises(RuntimeError) as err:
             market._first_working("rbob", "RB=F", "rb.f")
@@ -270,6 +322,183 @@ class _FakeResponse:
 
     def raise_for_status(self):
         return None
+
+
+class TestMarketCache:
+    """The daily job used to re-download twenty years of history every
+    morning. It now asks for a window and lays it over what it has."""
+
+    @staticmethod
+    def _cached(start="2020-01-01", periods=5) -> pd.DataFrame:
+        idx = pd.date_range(start, periods=periods, freq="D")
+        return pd.DataFrame(
+            {
+                "date": idx,
+                "rbob": 2.0,
+                "brent": 80.0,
+                "eurusd": 1.1,
+                "rbob_eur_l": 0.48,
+                "brent_eur_l": 0.46,
+            }
+        )
+
+    @staticmethod
+    def _window(start, periods=3, value=3.0) -> pd.DataFrame:
+        idx = pd.date_range(start, periods=periods, freq="D")
+        return pd.DataFrame(
+            {"rbob": value, "brent": 90.0, "eurusd": 1.2}, index=idx
+        )
+
+    def test_keeps_history_the_window_no_longer_covers(self):
+        """The whole point of the cache: 2006 is not in a 6-month window,
+        and throwing it away would throw away the training data with it."""
+        spliced = market._splice(self._cached(), self._window("2020-01-04"))
+        assert spliced.index.min() == pd.Timestamp("2020-01-01")
+        assert spliced.index.max() == pd.Timestamp("2020-01-06")
+
+    def test_fresh_rows_win_on_overlapping_dates(self):
+        """Providers revise a close after the fact; the window is fetched
+        precisely to pick that up."""
+        spliced = market._splice(self._cached(), self._window("2020-01-04"))
+        assert spliced.loc["2020-01-04", "rbob"] == pytest.approx(3.0)
+        assert spliced.loc["2020-01-01", "rbob"] == pytest.approx(2.0)
+
+    def test_no_cache_means_the_full_history(self):
+        assert len(market._splice(None, self._window("2020-01-01"))) == 3
+
+    def test_second_fetch_tops_up_instead_of_re_downloading(
+        self, tmp_path, monkeypatch
+    ):
+        """The wiring, not just the splice: the first call takes the full
+        history, a later one asks for a window and keeps what it had."""
+        monkeypatch.setattr(market, "RAW", tmp_path)
+        windows = []
+
+        def provider(symbol, window=None):
+            windows.append(window)
+            end = "2020-06-30" if window == market._FULL_RANGE else "2020-07-31"
+            idx = pd.date_range("2020-01-01", end, freq="D")
+            return pd.Series(2.0, index=idx)
+
+        monkeypatch.setattr(market, "_yahoo", provider)
+
+        first = market.fetch()
+        assert set(windows) == {market._FULL_RANGE}
+        assert first["date"].max() == pd.Timestamp("2020-06-30")
+
+        # Age the cache past its expiry so the next call actually refetches.
+        import os
+
+        stale = dt.datetime.now() - dt.timedelta(days=1)
+        os.utime(tmp_path / "market.parquet", (stale.timestamp(), stale.timestamp()))
+
+        windows.clear()
+        second = market.fetch()
+        assert set(windows) == {market._TOPUP_RANGE}
+        assert second["date"].min() == pd.Timestamp("2020-01-01")
+        assert second["date"].max() == pd.Timestamp("2020-07-31")
+
+    def test_a_fresh_cache_is_served_without_a_request(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(market, "RAW", tmp_path)
+        self._cached().to_parquet(tmp_path / "market.parquet", index=False)
+        monkeypatch.setattr(
+            market, "_yahoo",
+            lambda s, w=None: (_ for _ in ()).throw(AssertionError("no request")),
+        )
+        monkeypatch.setattr(
+            market, "_stooq",
+            lambda s, w=None: (_ for _ in ()).throw(AssertionError("no request")),
+        )
+        assert len(market.fetch()) == 5
+
+    def test_weekends_are_filled_and_converted(self):
+        idx = pd.DatetimeIndex(["2026-01-02", "2026-01-05"])  # Friday, Monday
+        raw = pd.DataFrame({"rbob": 2.0, "brent": 80.0, "eurusd": 1.0}, index=idx)
+        out = market._derive(raw)
+        assert len(out) == 4  # the weekend is carried forward
+        assert out["rbob_eur_l"].iloc[0] == pytest.approx(2.0 / 3.785411784)
+
+
+class TestCacheFreshness:
+    """A cache with no expiry is not a cache but a snapshot: without this
+    check a local run keeps using whatever prices it first downloaded."""
+
+    def test_a_missing_file_is_never_fresh(self, tmp_path):
+        assert not cache_policy.is_fresh(tmp_path / "absent.parquet")
+
+    def test_a_file_just_written_is_fresh(self, tmp_path):
+        path = tmp_path / "market.parquet"
+        path.write_text("x")
+        assert cache_policy.is_fresh(path)
+
+    def test_an_old_file_is_not(self, tmp_path):
+        import os
+
+        path = tmp_path / "market.parquet"
+        path.write_text("x")
+        stale = dt.datetime.now() - dt.timedelta(days=3)
+        os.utime(path, (stale.timestamp(), stale.timestamp()))
+        assert not cache_policy.is_fresh(path)
+
+
+class TestCbsCacheFallback:
+    """A CBS outage should cost freshness, not correctness -- but only for
+    as long as the cache still represents the latest release."""
+
+    @staticmethod
+    def _cache(tmp_path, monkeypatch, age: dt.timedelta):
+        import os
+
+        monkeypatch.setattr(cbs, "RAW", tmp_path)
+        path = tmp_path / f"cbs_{cbs.CBS_TABLE}.parquet"
+        pump, _ = synthetic.generate(start="2024-01-01", end="2024-03-01")
+        pump.to_parquet(path, index=False)
+        written = dt.datetime.now() - age
+        os.utime(path, (written.timestamp(), written.timestamp()))
+        monkeypatch.setattr(
+            cbs, "_download",
+            lambda: (_ for _ in ()).throw(RuntimeError("CBS unreachable")),
+        )
+        return path
+
+    def test_a_recent_cache_absorbs_an_outage(self, tmp_path, monkeypatch, capsys):
+        self._cache(tmp_path, monkeypatch, dt.timedelta(days=2))
+        assert not cbs.fetch().empty
+        assert "CBS refresh failed" in capsys.readouterr().out
+
+    def test_an_old_cache_does_not(self, tmp_path, monkeypatch):
+        """Past a release cycle the cache is missing a publication, and
+        pretending otherwise is worse than a red run."""
+        self._cache(tmp_path, monkeypatch, dt.timedelta(days=30))
+        with pytest.raises(RuntimeError, match="CBS unreachable"):
+            cbs.fetch()
+
+    def test_no_cache_at_all_raises(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(cbs, "RAW", tmp_path)
+        monkeypatch.setattr(
+            cbs, "_download",
+            lambda: (_ for _ in ()).throw(RuntimeError("CBS unreachable")),
+        )
+        with pytest.raises(RuntimeError, match="CBS unreachable"):
+            cbs.fetch()
+
+
+class TestDegradedInputs:
+    """Optional inputs must degrade, not detonate: an unreadable extra
+    should never be able to stop a forecast that has everything it needs."""
+
+    def test_a_corrupt_advisory_history_still_yields_a_forecast(
+        self, monkeypatch, capsys
+    ):
+        monkeypatch.setattr(
+            pipeline.gla, "load",
+            lambda: (_ for _ in ()).throw(ValueError("bad line 3")),
+        )
+        pump, mkt, advisory, resolved = pipeline.load_inputs("synthetic")
+        assert advisory.empty
+        assert resolved == "synthetic"
+        assert not build_panel(pump, mkt, advisory).empty
+        assert "advisory-price history unreadable" in capsys.readouterr().out
 
 
 class TestAdvisoryScraper:

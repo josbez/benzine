@@ -1,7 +1,22 @@
-pandas>=2.0
-numpy>=1.24
-scikit-learn>=1.3
-requests>=2.31
-PyYAML>=6.0
-pyarrow>=14.0   # pandas needs it for the parquet caches
-pytest>=7.4     # the weekly workflow runs the test suite
+# Exact versions, deliberately. With lower bounds only, every CI run
+# installed whatever had been released that morning: the weekly backtest
+# broke on a scikit-learn release whose SimpleImputer had picked up a new
+# `keep_empty_features` default, and nothing in this repository had
+# changed. A daily job on a moving dependency set is a build that fails on
+# days you did not touch it.
+#
+# Dependabot raises these (see .github/dependabot.yml) and the test suite
+# runs on the proposed version before it is merged, which is the same
+# freshness with the failure moved into a pull request.
+#
+# Only the direct dependencies are pinned, not the full transitive tree. A
+# pip-compile lock would close the remaining gap (scipy, joblib) at the
+# cost of a toolchain to regenerate it; the breakages seen so far have all
+# been in this list.
+pandas==3.0.5
+numpy==2.4.6
+scikit-learn==1.9.0
+requests==2.34.2
+PyYAML==6.0.3
+pyarrow==25.0.0   # pandas needs it for the parquet caches
+pytest==9.1.1     # the workflows run the test suite

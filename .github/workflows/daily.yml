@@ -13,9 +13,11 @@ on:
       - "web/**"
       - "src/**"
       - ".github/workflows/daily.yml"
+      - ".github/scripts/**"
 
 permissions:
   contents: write   # advisory-price history, and the gh-pages branch
+  issues: write     # raising the alarm when the scraper breaks
 
 # Never let two runs race on the advisory-price file.
 concurrency:
@@ -33,56 +35,117 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      # Only the download caches, never data/raw/gla_history.csv: that file
+      # is tracked in git, and restoring a stale copy over the checkout
+      # would make the next commit silently revert a day of history.
+      #
+      # Restore and save are separate actions rather than one `actions/cache`
+      # step because this job is expected to end red for as long as Pages is
+      # stuck, and the combined action's post step does not save the cache
+      # when the job fails -- which would mean re-downloading twenty years
+      # of history every morning, forever.
+      - name: Restore source caches
+        uses: actions/cache/restore@v4
+        with:
+          path: data/raw/*.parquet
+          key: source-caches-${{ github.run_id }}
+          restore-keys: source-caches-
+
       - run: pip install -r requirements.txt
 
-      # There is no public archive of advisory prices, so the history is
-      # only as long as the number of days this job has run. A failure here
-      # must not fail the build -- the pipeline falls back to the CBS anchor
-      # -- but it must be visible, because a silently broken scraper would
-      # cost a day of history every day until someone noticed.
+      # ----------------------------------------------------------------
+      # Perishable data first. Everything below this block can fail
+      # without costing anything that cannot be fetched again; the
+      # advisory price cannot. There is no public archive of it, so a day
+      # not recorded here is a day missing from the series forever -- and
+      # that series is what will eventually let the site show a same-day
+      # price instead of a CBS figure up to nine days old.
+      #
+      # This is why the commit runs *before* the build, and not, as it
+      # used to, after it: on 6 August the build failed nine times in a
+      # row and every one of those runs threw away a scraped price it was
+      # already holding.
+      # ----------------------------------------------------------------
       - name: Record today's advisory price
+        id: snapshot
         run: |
-          if ! make snapshot; then
-            echo "::warning title=Advisory price not recorded::Scraping \
-          UnitedConsumers failed. The forecast falls back to the CBS anchor, \
-          but today's advisory price is lost permanently. See src/benzine/sources/gla.py."
+          # Without pipefail the exit status through `tee` is tee's, and a
+          # broken scraper would report success.
+          set -o pipefail
+          if make snapshot 2>&1 | tee "$RUNNER_TEMP/snapshot.log"; then
+            exit 0
           fi
+          echo "failed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Commit advisory-price history
+        run: |
+          .github/scripts/commit-and-push.sh \
+            data/raw/gla_history.csv \
+            "Record advisory price for $(date -u +%Y-%m-%d)"
+
+      # A warning in a log nobody reads is indistinguishable from nothing
+      # happening, and every unnoticed day is one more permanent hole in
+      # the series. One open issue, updated in place, so a scraper that
+      # breaks for a fortnight does not produce a fortnight of issues.
+      - name: Report a broken scraper
+        if: steps.snapshot.outputs.failed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo "The daily run could not read today's Euro 95 advisory price"
+            echo "from UnitedConsumers. The forecast falls back to the CBS"
+            echo "anchor, but today's advisory price is lost permanently."
+            echo
+            echo "Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo
+            echo '```'
+            tail -c 6000 "$RUNNER_TEMP/snapshot.log"
+            echo '```'
+          } > "$RUNNER_TEMP/issue.md"
+
+          existing=$(gh issue list --label scraper --state open \
+            --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file "$RUNNER_TEMP/issue.md"
+          else
+            gh label create scraper --color d93f0b \
+              --description "The advisory-price scraper needs attention" \
+              2>/dev/null || true
+            gh issue create --label scraper \
+              --title "Advisory-price scraper is failing" \
+              --body-file "$RUNNER_TEMP/issue.md"
+          fi
+
+      # ----------------------------------------------------------------
+      # From here on, failing is allowed: nothing below is perishable.
+      # ----------------------------------------------------------------
+      - name: Run tests
+        run: PYTHONPATH=src python -m pytest tests/ -q
 
       # Deliberately --source live, not auto: if a feed is down we want a
       # red build, not a synthetic forecast quietly published as if real.
       - name: Build forecast
         run: PYTHONPATH=src python -m benzine forecast --source live
 
-      - name: Commit advisory-price history
-        run: |
-          # The scrape is allowed to fail, so the file may not exist at all.
-          if [ ! -f data/raw/gla_history.csv ]; then
-            echo "no advisory-price history yet -- scrape likely failed"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # Stage first, then compare against the index: on the very first
-          # run the file is untracked, and `git diff` alone does not see
-          # untracked files -- so day one would never be recorded.
-          git add data/raw/gla_history.csv
-          if git diff --cached --quiet; then
-            echo "no new advisory price to store"
-            exit 0
-          fi
-          git commit -m "Record advisory price for $(date -u +%Y-%m-%d)"
-          git push
+      - name: Save source caches
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/raw/*.parquet
+          key: source-caches-${{ github.run_id }}
 
       # Published by pushing to a branch rather than through the Pages
       # deployment API (configure-pages / upload-pages-artifact /
       # deploy-pages). That API repeatedly accepted a deployment and then
-      # sat on "deployment_in_progress" indefinitely -- nothing on our side
-      # to fix, and nothing on our side to work around either, as long as
-      # we depended on it.
+      # sat on "deployment_in_progress" indefinitely.
       #
-      # A branch push goes through Pages' other, older serving path, so a
-      # stall in the deployment API cannot block it. It is also simply less
-      # machinery: no artifact, no environment, no deployment to poll.
+      # Note that this has not in fact fixed anything: GitHub's own "pages
+      # build and deployment" workflow, which a push to this branch
+      # triggers, runs deploy-pages internally and stalls in exactly the
+      # same way (run 31110887125). The branch route is kept because it is
+      # less machinery, not because it is a workaround -- the stall is a
+      # Pages configuration problem and has to be fixed there.
       #
       # The branch is rebuilt from a single commit each time. It holds
       # generated output only, so its history is worth nothing and an
@@ -109,3 +172,11 @@ jobs:
           echo "published $(ls | tr '\n' ' ')"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # A green run that published nothing is worse than a red one: it is
+      # the reason this went unnoticed for as long as it did. Until the
+      # Pages deployment is unstuck this step will fail every day, which
+      # is the correct reading of the situation -- and by now it fails
+      # after the advisory price is safely committed.
+      - name: Verify the site serves this run's forecast
+        run: python .github/scripts/verify_published.py web/forecast.json 300
