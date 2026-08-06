@@ -33,8 +33,13 @@ jobs:
       - name: Run tests
         run: PYTHONPATH=src python -m pytest tests/ -q
 
+      # Refit every 60 days rather than the CLI default of 30. The panel
+      # spans roughly twenty years, so halving the number of refits halves
+      # a run that was otherwise threatening the timeout below. With that
+      # much training history the model barely moves between refits, so
+      # the accuracy cost is small and the reliability gain is not.
       - name: Walk-forward backtest
-        run: PYTHONPATH=src python -m benzine backtest --source live
+        run: PYTHONPATH=src python -m benzine backtest --source live --refit-every 60
 
       - name: Commit refreshed scores
         run: |
