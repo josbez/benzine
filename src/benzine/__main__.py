@@ -20,6 +20,11 @@ def main() -> None:
     )
     parser.add_argument("--model", default="gbm", choices=["naive", "ecm", "gbm"])
     parser.add_argument("--refit-every", type=int, default=30)
+    parser.add_argument(
+        "--test-years", type=float, default=bt.TEST_YEARS,
+        help="length of the scored out-of-sample window; training still "
+             "expands over all earlier data. 0 scores the whole panel.",
+    )
     args = parser.parse_args()
 
     print(f"[1] building panel (source={args.source})")
@@ -33,8 +38,15 @@ def main() -> None:
     metrics = None
     if args.command in ("backtest", "all"):
         print("[2] walk-forward backtest")
-        result = bt.run(panel, refit_every=args.refit_every)
+        result = bt.run(
+            panel,
+            refit_every=args.refit_every,
+            test_years=args.test_years or None,
+        )
         metrics = result.metrics
+        scored = result.predictions["date"]
+        print(f"    scored {scored.min().date()} -> {scored.max().date()} "
+              f"({scored.nunique():,} origins, refit every {args.refit_every}d)")
         print()
         print(result.summary())
         print()

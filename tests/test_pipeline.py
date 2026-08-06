@@ -99,6 +99,24 @@ class TestShortMarketHistory:
         with_gap = model.predict(gapped)["q50"].to_numpy()
         assert (base[1:] == pytest.approx(with_gap[1:]))
 
+    def test_test_years_bounds_what_is_scored_not_what_is_trained(self):
+        """Limiting the window must shorten the evaluation, not the history
+        each model gets to learn from."""
+        from benzine import backtest as bt
+
+        pump, mkt = self._inputs()
+        panel = build_panel(pump, mkt)
+
+        short = bt.walk_forward(panel, horizon=2, model_name="ecm",
+                                refit_every=120, test_years=1.0)
+        long = bt.walk_forward(panel, horizon=2, model_name="ecm",
+                               refit_every=120, test_years=None)
+
+        assert short["date"].min() > long["date"].min()
+        assert short["date"].max() == long["date"].max()
+        # The shorter window still trains on everything before it.
+        assert short["n_train"].min() >= long["n_train"].min()
+
     def test_backtest_skips_windows_it_cannot_train_on(self):
         from benzine import backtest as bt
 

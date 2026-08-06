@@ -115,6 +115,15 @@ That makes the naive baseline exactly "no change" — a genuinely strong
 benchmark for a near-random-walk series, and the only fair thing to measure
 against. Reported skill is the reduction in MAE relative to it.
 
+Evaluation covers the **most recent five years**, while training still
+expands over everything before each refit. That bound is not primarily
+about runtime: the panel reaches back to 2006, and how the model would have
+done in 2008 says little about how it does now — different excise regime,
+different retail structure, and a large share of the sample sitting inside
+the 2008 and 2020 price collapses. A headline accuracy averaged over
+eighteen years mostly measures history. Pass `--test-years 0` to score the
+whole panel anyway.
+
 Output is a set of quantiles (10/25/50/75/90), not a single line, so the app
 can show a widening band instead of implying false precision.
 
