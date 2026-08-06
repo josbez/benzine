@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
+from sklearn.impute import SimpleImputer
 from sklearn.linear_model import Ridge
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
@@ -94,17 +95,29 @@ class ECMForecaster(Forecaster):
         self.columns = [c for c in self.KEY_FEATURES if c in panel.columns]
         self.columns.append(f"duty_step_h{horizon}")
 
-        frame = panel[self.columns + [f"y_h{horizon}"]].dropna()
+        # Drop rows with no target, but impute missing *features* rather
+        # than dropping them. Dropping was both fragile and inconsistent:
+        # a single all-NaN feature column emptied the training set (which
+        # is exactly what happens early in the sample, before the market
+        # series begins), while predict filled the same gaps with zero. Fit
+        # and predict have to treat missing values identically.
+        frame = panel[self.columns + [f"y_h{horizon}"]].dropna(
+            subset=[f"y_h{horizon}"]
+        )
         X = self._clean(frame[self.columns])
         y = frame[f"y_h{horizon}"].to_numpy()
 
-        self._model = make_pipeline(StandardScaler(), Ridge(alpha=self.alpha)).fit(X, y)
+        self._model = make_pipeline(
+            SimpleImputer(strategy="median", keep_empty_features=True),
+            StandardScaler(),
+            Ridge(alpha=self.alpha),
+        ).fit(X, y)
         resid = y - self._model.predict(X)
         self._resid_q = {q: float(np.quantile(resid, q)) for q in self.quantiles}
         return self
 
     def predict(self, panel: pd.DataFrame) -> pd.DataFrame:
-        X = self._clean(panel[self.columns].fillna(0.0))
+        X = self._clean(panel[self.columns])  # the pipeline imputes
         centre = self._model.predict(X)
         return self._as_frame({q: centre + off for q, off in self._resid_q.items()})
 

@@ -25,6 +25,9 @@ from .config import HORIZONS, QUANTILES
 from .model import MODELS
 from .sources.cbs import publication_date
 
+# Usable training rows (target observed) needed before a refit is attempted.
+MIN_TRAIN_ROWS = 200
+
 
 @dataclass
 class BacktestResult:
@@ -79,7 +82,11 @@ def walk_forward(
             continue
 
         train = work[work["target_known_at"] <= refit_at]
-        if len(train) < 200:
+        # Count rows that can actually train a model. Counting raw rows
+        # instead let a window through that had plenty of dates but no
+        # usable wholesale features, and the failure surfaced deep inside
+        # scikit-learn rather than here.
+        if train[f"y_h{horizon}"].notna().sum() < MIN_TRAIN_ROWS:
             continue
 
         model = MODELS[model_name]().fit(train, horizon)

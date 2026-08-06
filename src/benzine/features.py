@@ -78,7 +78,25 @@ def build_panel(
     _add_calendar(panel)
     _add_targets(panel, truth, horizons)
 
-    return panel
+    return _trim_to_usable(panel)
+
+
+def _trim_to_usable(panel: pd.DataFrame) -> pd.DataFrame:
+    """Drop the leading rows that predate the wholesale series.
+
+    CBS pump prices start years before the free market feeds do, and a row
+    with no wholesale price carries none of the signal this model runs on.
+    Leaving those rows in is not merely wasteful: a training window landing
+    entirely inside that era has every market feature missing at once,
+    which is a far more confusing failure than a short panel.
+    """
+    usable = panel["margin"].notna()
+    if not usable.any():
+        raise ValueError(
+            "no rows have wholesale prices -- the market series does not "
+            "overlap the pump series at all"
+        )
+    return panel.loc[usable.idxmax() :].reset_index(drop=True)
 
 
 # --------------------------------------------------------------------------
