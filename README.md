@@ -122,12 +122,18 @@ can show a widening band instead of implying false precision.
 |---|---|---|
 | [CBS 80416ned](https://www.cbs.nl/nl-nl/cijfers/detail/80416ned) | daily national average pump price | training label |
 | [UnitedConsumers GLA](https://www.unitedconsumers.com/tanken/info/gemiddelde-landelijke-adviesprijs) | daily advisory price | live anchor |
-| Stooq (RBOB, Brent, EUR/USD) | wholesale market | leading indicator |
+| Yahoo Finance, then Stooq (RBOB, Brent, EUR/USD) | wholesale market | leading indicator |
 | `data/excise.yaml` | accijns schedule | known future steps |
 
 RBOB stands in for the real EBOB Rotterdam assessment, which is a paid
 Argus/Platts product. Swapping in a licensed EBOB feed means changing
 `sources/market.py` and nothing else.
+
+Each market series is tried against Yahoo Finance first and Stooq second.
+That redundancy is not paranoia: Stooq serves a block page rather than CSV
+to datacentre IP ranges, so it works from a laptop and fails from a GitHub
+runner — and a single provider is a single point of failure for the whole
+daily job.
 
 ## Models
 

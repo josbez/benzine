@@ -59,16 +59,49 @@ def scrape(html: str | None = None) -> float:
     text = to_text(html)
     price = find_price(text)
     if price is None:
-        # Include what we actually saw: a 403, a cookie wall and a genuine
-        # markup change all fail identically otherwise, and the page cannot
-        # be inspected from wherever this happens to be running.
+        # Include what we actually saw: a 403, a cookie wall, client-side
+        # rendering and a genuine markup change all fail identically
+        # otherwise, and the page cannot be inspected from wherever this
+        # happens to be running.
         raise RuntimeError(
-            "could not locate a Euro95 price on the UnitedConsumers page. "
-            "The markup may have changed, the response may be a block page, "
-            "or the prices may be rendered client-side. First 600 characters "
-            f"of the page text follow:\n{text[:600]!r}"
+            "could not locate a Euro95 price on the UnitedConsumers page.\n"
+            + diagnose(text)
         )
     return price
+
+
+def diagnose(text: str, context: int = 90) -> str:
+    """A report that distinguishes the ways this scrape can fail.
+
+    The decisive question is whether any price-shaped token exists in the
+    page text at all. If none does, the prices are rendered client-side and
+    no amount of parsing will find them -- the fix is to call whatever
+    endpoint the page's own JavaScript calls, not to widen a regex.
+    """
+    prices = _PRICE.findall(text)
+    lowered = text.lower()
+
+    lines = [
+        f"page text: {len(text)} chars",
+        f"price-shaped tokens found anywhere: {len(prices)} {prices[:10]}",
+    ]
+
+    for label in _LABELS:
+        hits = []
+        start = 0
+        while (idx := lowered.find(label, start)) != -1 and len(hits) < 3:
+            start = idx + 1
+            hits.append(text[max(0, idx - 20) : idx + context])
+        lines.append(f"label {label!r}: {len(hits)} shown {hits}")
+
+    if not prices:
+        lines.append(
+            "VERDICT: no price anywhere in the page text -- the figures are "
+            "almost certainly rendered client-side; find the JSON endpoint "
+            "the page calls instead of parsing HTML."
+        )
+    lines.append(f"first 400 chars: {text[:400]!r}")
+    return "\n".join(lines)
 
 
 def to_text(html: str) -> str:

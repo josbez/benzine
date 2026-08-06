@@ -15,7 +15,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from benzine.features import build_panel  # noqa: E402
-from benzine.sources import excise, gla, synthetic  # noqa: E402
+from benzine.sources import excise, gla, market, synthetic  # noqa: E402
 from benzine.sources.cbs import publication_date  # noqa: E402
 
 
@@ -48,6 +48,71 @@ class TestExcise:
     def test_future_dates_carry_the_latest_known_rate(self):
         rate = excise.series(pd.DatetimeIndex(["2027-05-05"])).iloc[0]
         assert rate == pytest.approx(0.8447)
+
+
+class TestMarketProviders:
+    """Free market feeds answer fine from a laptop and return block pages
+    from cloud runners, so the fallback path is the one that matters."""
+
+    @staticmethod
+    def _series(n=3):
+        idx = pd.date_range("2026-01-01", periods=n, freq="D")
+        return pd.Series(range(n), index=idx, dtype=float)
+
+    def test_falls_back_when_the_first_provider_fails(self, monkeypatch):
+        monkeypatch.setattr(
+            market, "_yahoo",
+            lambda s: (_ for _ in ()).throw(RuntimeError("blocked")),
+        )
+        monkeypatch.setattr(market, "_stooq", lambda s: self._series())
+        assert len(market._first_working("rbob", "RB=F", "rb.f")) == 3
+
+    def test_falls_back_when_the_first_provider_returns_nothing(self, monkeypatch):
+        """An empty series is a failure, not a valid answer."""
+        monkeypatch.setattr(market, "_yahoo", lambda s: pd.Series(dtype=float))
+        monkeypatch.setattr(market, "_stooq", lambda s: self._series())
+        assert len(market._first_working("rbob", "RB=F", "rb.f")) == 3
+
+    def test_reports_every_attempt_when_all_fail(self, monkeypatch):
+        """The error has to name both providers, or diagnosing it from a CI
+        log means guessing which one was even tried."""
+        monkeypatch.setattr(
+            market, "_yahoo",
+            lambda s: (_ for _ in ()).throw(RuntimeError("yahoo down")),
+        )
+        monkeypatch.setattr(
+            market, "_stooq",
+            lambda s: (_ for _ in ()).throw(RuntimeError("got HTML")),
+        )
+        with pytest.raises(RuntimeError) as err:
+            market._first_working("rbob", "RB=F", "rb.f")
+        assert "yahoo down" in str(err.value)
+        assert "got HTML" in str(err.value)
+
+    def test_stooq_rejects_an_html_block_page(self, monkeypatch):
+        """The exact failure seen from GitHub's runners: HTML, not CSV,
+        served with a 200 so raise_for_status does not catch it."""
+        monkeypatch.setattr(
+            market.requests, "get",
+            lambda *a, **k: _FakeResponse("<meta charset=utf-8><title>Stooq</title>"),
+        )
+        with pytest.raises(RuntimeError, match="expected CSV"):
+            market._stooq("cb.f")
+
+    def test_stooq_accepts_real_csv(self, monkeypatch):
+        csv = "Date,Open,High,Low,Close,Volume\n2026-01-02,2.0,2.1,1.9,2.05,10\n"
+        monkeypatch.setattr(
+            market.requests, "get", lambda *a, **k: _FakeResponse(csv)
+        )
+        assert market._stooq("cb.f").iloc[0] == pytest.approx(2.05)
+
+
+class _FakeResponse:
+    def __init__(self, text):
+        self.text = text
+
+    def raise_for_status(self):
+        return None
 
 
 class TestAdvisoryScraper:
