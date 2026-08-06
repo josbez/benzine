@@ -71,42 +71,57 @@ The branch is force-pushed as a single commit each time. It holds
 generated output only, so its history is worth nothing and letting it grow
 would cost clone time forever.
 
-### Pages does not currently work, and it is not the code
+### Pages has never actually served anything — what is known, 6 Aug 2026
 
-The API route (`configure-pages` / `upload-pages-artifact` /
-`deploy-pages`) was tried first: it repeatedly created a deployment and
-then sat on `deployment_in_progress` until it timed out. Switching to a
-branch push was expected to sidestep that. **It did not.** Pushing to
-`gh-pages` triggers GitHub's own *pages build and deployment* workflow,
-which runs `deploy-pages` internally and stalls in exactly the same place
-(run `31110887125`). Both routes end in the same stuck deployment, and
-`https://josbez.github.io/benzine/` has never served anything.
+Facts, in the order they were established:
 
-So this is a Pages configuration problem on the repository, not something
-the workflow can route around. To clear it:
+- The deployment-API route (`configure-pages` / `upload-pages-artifact` /
+  `deploy-pages`) repeatedly created a deployment and then sat on
+  `deployment_in_progress` until it timed out.
+- Switching to a branch push did **not** sidestep that. Pushing to
+  `gh-pages` triggers GitHub's own *pages build and deployment* workflow,
+  which runs `deploy-pages` internally and stalls in the same place (run
+  `31110887125`). So the branch route buys less than the earlier version
+  of this README claimed.
+- **Settings → Pages** is configured correctly: *Deploy from a branch*,
+  `gh-pages` / `(root)`. This was verified, not assumed. A source mismatch
+  is therefore not the explanation.
+- GitHub had a live Actions incident that evening whose status updates
+  named Pages explicitly ("GitHub Pages may experience failures or
+  delays"), with jobs queued and never picked up. Whether it also covers
+  the earlier stalls depends on when the incident began, which was not
+  established.
 
-1. Check **Settings → Pages** — with a branch push the source must be
-   *Deploy from a branch*, not *GitHub Actions*. A mismatch here produces
-   precisely this symptom.
-2. Cancel any deployment stuck in the `github-pages` environment
+What that adds up to: the cause is **not identified**. It is somewhere in
+Pages' own deployment machinery, and nothing in this repository has been
+shown to influence it. Resist the temptation to write a convincing story
+here — the previous version of this section argued at length that a branch
+push could not be blocked by a deployment stall, and the logs then showed
+exactly that happening.
+
+The order to work through, cheapest first:
+
+1. Re-run the daily workflow once GitHub reports the incident resolved.
+   That is the one test that has not been run under normal conditions.
+2. Cancel anything stuck in the `github-pages` environment
    (`gh api repos/josbez/benzine/deployments` → `POST .../statuses` with
-   `state=inactive`, or delete them), then re-run the daily workflow.
-3. Check whether `github-pages` has environment protection rules waiting
-   on an approval nobody is giving.
-4. If none of that clears it, publish `web/` to Netlify or Cloudflare
-   Pages instead — the site is three static files and one JSON, so the
-   hosting choice carries no weight.
+   `state=inactive`), then re-run.
+3. Check `github-pages` for environment protection rules waiting on an
+   approval nobody is giving.
+4. If it still will not deploy, publish `web/` to Netlify or Cloudflare
+   Pages instead — three static files and one JSON, so the hosting choice
+   carries no weight.
 
-The daily run now ends with a healthcheck that polls the live
-`forecast.json` until it carries the `generated_at` of the build that just
-ran, and fails otherwise. Until the above is sorted the workflow will
-therefore go red every day — deliberately, because the alternative is a
-green run publishing to a site nobody is serving. The advisory price is
-committed long before that step, so a red run no longer costs any data.
+The daily run ends with a healthcheck that polls the live `forecast.json`
+until it carries the `generated_at` of the build that just ran, and fails
+otherwise. Until Pages serves, the workflow therefore goes red every day —
+deliberately, because the alternative is a green run publishing to a site
+nobody is serving. The advisory price is committed long before that step,
+so a red run costs no data.
 
 The branch push is kept regardless: it is less machinery than the artifact
 route (no artifact, no environment, no deployment to poll), which is a
-reason to prefer it but was never a reason to expect it to fix the stall.
+reason to prefer it but was never a reason to expect it to fix a stall.
 
 Two things worth knowing:
 
