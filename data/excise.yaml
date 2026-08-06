@@ -7,6 +7,19 @@
 #
 # Verify against the Belastingdienst tariff tables before relying on these
 # for anything beyond the prototype.
+#
+# KNOWN GAP: the schedule starts in April 2022, but the pump series goes
+# back to 2006. Dates before the first entry are filled with the first
+# entry's rate, which is the *reduced* 2022 tariff -- so the roughly 17
+# cent excise cut of 1 April 2022 is invisible to the model, and it will
+# attribute the real pump-price drop that followed to something else.
+# Pre-2022 margins also carry a level error, though margin_dev largely
+# absorbs it by differencing against a rolling mean.
+#
+# Filling in the historical rates back to 2006 from the Belastingdienst
+# tables is the single cheapest accuracy improvement available here. They
+# are deliberately not guessed at: an invented tariff is worse than a
+# documented approximation.
 euro95:
   - date: 2022-04-01
     rate: 0.65100   # temporary reduction ("accijnskorting")

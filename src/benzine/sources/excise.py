@@ -27,8 +27,21 @@ def vat_rate() -> float:
 
 
 def series(dates: pd.DatetimeIndex, fuel: str = "euro95") -> pd.Series:
-    """Excise rate in force on each of `dates`, extended into the future."""
+    """Excise rate in force on each of `dates`.
+
+    Dates after the last scheduled change carry the last known rate, which
+    is exactly right: announced changes are known in advance and anything
+    beyond them is genuinely unchanged until legislated otherwise.
+
+    Dates *before* the first entry are a different matter. They are filled
+    with the earliest rate in the schedule, which is an approximation, not
+    a fact -- see the warning in data/excise.yaml. Filling from the schedule
+    rather than back-propagating whatever happens to be in range also fixes
+    a sharp edge: when every requested date preceded the schedule there was
+    nothing to back-fill from, and the whole series came back NaN, taking
+    the cost anchor and the entire panel down with it.
+    """
     sched = schedule(fuel).set_index("date")["rate"]
     idx = pd.DatetimeIndex(dates)
     full = sched.reindex(sched.index.union(idx)).ffill()
-    return full.reindex(idx).bfill().rename("excise")
+    return full.reindex(idx).fillna(float(sched.iloc[0])).rename("excise")

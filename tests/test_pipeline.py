@@ -128,6 +128,85 @@ class TestShortMarketHistory:
         assert preds["q50"].notna().all()
 
 
+class TestConformalIntervals:
+    """On real prices the nominal 80% band covered 58-67% of outcomes --
+    for every model, the naive baseline included. These pin the fix."""
+
+    @pytest.fixture(scope="class")
+    def panel(self):
+        pump, market = synthetic.generate(start="2016-01-01", end="2024-12-31")
+        return build_panel(pump, market)
+
+    @staticmethod
+    def _coverage(model, frame, horizon):
+        pred = model.predict(frame)
+        y = frame[f"y_h{horizon}"].to_numpy()
+        inside = (y >= pred["q10"].to_numpy()) & (y <= pred["q90"].to_numpy())
+        return float(inside.mean())
+
+    def test_calibration_holds_out_recent_data(self, panel):
+        """The band must be measured on data the model did not fit."""
+        from benzine.model import QuantileForecaster
+
+        model = QuantileForecaster(max_iter=40).fit(panel, 2)
+        assert model._widen, "no conformal widths were computed"
+
+    def test_intervals_widen_when_the_model_is_overconfident(self, panel):
+        """Squeeze a model's bands to a tenth and check calibration
+        notices. The ECM is well calibrated on synthetic data, so proving
+        the mechanism needs a model that is genuinely overconfident."""
+        from benzine.model import ECMForecaster
+
+        class Overconfident(ECMForecaster):
+            def _predict_raw(self, frame):
+                raw = super()._predict_raw(frame)
+                centre = raw["q50"]
+                return raw.apply(lambda col: centre + (col - centre) * 0.1)
+
+        model = Overconfident().fit(panel, 2)
+        assert model._widen[(0.1, 0.9)] > 0
+
+        tail = panel.tail(200)
+        raw_span = (model._predict_raw(tail)["q90"]
+                    - model._predict_raw(tail)["q10"]).mean()
+        adj = model.predict(tail)
+        assert (adj["q90"] - adj["q10"]).mean() > raw_span
+
+    def test_calibration_never_narrows(self, panel):
+        """The correction is one-sided on purpose: allowing it to tighten
+        took synthetic coverage from 79% to 65%."""
+        from benzine.model import ECMForecaster, QuantileForecaster
+
+        for model in (ECMForecaster().fit(panel, 2),
+                      QuantileForecaster(max_iter=40).fit(panel, 2)):
+            assert all(w >= 0 for w in model._widen.values())
+
+    def test_calibrated_coverage_beats_uncalibrated(self, panel):
+        """The whole point: closer to the 80% it claims."""
+        from benzine.model import ECMForecaster
+
+        train = panel[panel["date"] < "2023-01-01"]
+        held_out = panel[panel["date"] >= "2023-01-01"].dropna(subset=["y_h2"])
+
+        model = ECMForecaster().fit(train, 2)
+        calibrated = self._coverage(model, held_out, 2)
+
+        uncalibrated_model = ECMForecaster().fit(train, 2)
+        uncalibrated_model._widen = {}
+        uncalibrated = self._coverage(uncalibrated_model, held_out, 2)
+
+        assert abs(calibrated - 0.80) <= abs(uncalibrated - 0.80)
+
+    def test_short_history_skips_calibration_rather_than_fitting_a_stub(self):
+        from benzine.model import ECMForecaster
+
+        pump, market = synthetic.generate(start="2020-01-01", end="2020-09-30")
+        small = build_panel(pump, market)
+        model = ECMForecaster().fit(small, 2)
+        assert model._widen == {}
+        assert model.predict(small.tail(3))["q50"].notna().all()
+
+
 class TestMarketProviders:
     """Free market feeds answer fine from a laptop and return block pages
     from cloud runners, so the fallback path is the one that matters."""
