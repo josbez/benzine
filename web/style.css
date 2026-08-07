@@ -425,12 +425,28 @@ h1, .h1 {
   .chart-head { flex-direction: row; align-items: center; justify-content: space-between; }
 }
 
-.chart-controls {
+.chart-title {
   display: flex;
-  gap: 8px;
+  align-items: center;
+  gap: 6px;
 }
 
-.chart-controls .range-select { width: auto; }
+.range-select-inline {
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: var(--primary);
+  background: transparent;
+  border: none;
+  border-bottom: 1px dashed var(--primary);
+  padding: 0 0 1px;
+  cursor: pointer;
+}
+
+.range-select-inline:focus {
+  outline: none;
+  border-bottom-style: solid;
+}
 
 .chart-shell { position: relative; }
 

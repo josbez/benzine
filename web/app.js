@@ -5,7 +5,7 @@
  * page self-contained. Shared formatting helpers live in shared.js.
  */
 
-const CHART_DAYS_DEFAULT = 30; // of history to show alongside the 5-day forecast
+const CHART_DAYS_DEFAULT = 5; // of history to show alongside the 5-day forecast, matches the range select's default
 
 init();
 
