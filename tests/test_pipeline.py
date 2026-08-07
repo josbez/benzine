@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from benzine import pipeline  # noqa: E402
 from benzine.features import build_panel  # noqa: E402
 from benzine.sources import cache as cache_policy  # noqa: E402
-from benzine.sources import cbs, excise, gla, market, synthetic  # noqa: E402
+from benzine.sources import cbs, excise, gla, market, retry, synthetic  # noqa: E402
 from benzine.sources.cbs import publication_date  # noqa: E402
 
 
@@ -223,7 +223,7 @@ class TestMarketProviders:
     def _no_waiting(self, monkeypatch):
         """Record the backoff instead of sleeping through it."""
         self.slept = []
-        monkeypatch.setattr(market.time, "sleep", self.slept.append)
+        monkeypatch.setattr(retry.time, "sleep", self.slept.append)
 
     def test_falls_back_when_the_first_provider_fails(self, monkeypatch):
         monkeypatch.setattr(
@@ -259,15 +259,24 @@ class TestMarketProviders:
         assert len(calls) == 2
         assert len(self.slept) == 1
 
-    def test_backoff_grows_between_attempts(self, monkeypatch):
+    def test_backoff_doubles_between_attempts(self, monkeypatch):
+        """Each wait sits in its own attempt's jittered band.
+
+        Not `slept[1] > slept[0]`: with ±50% jitter the bands overlap, so
+        that assertion fails a few percent of the time -- which in a job
+        that runs unattended at 03:00 is the worst kind of test.
+        """
         monkeypatch.setattr(
             market, "_yahoo",
             lambda s, w=None: (_ for _ in ()).throw(RuntimeError("down")),
         )
         monkeypatch.setattr(market, "_stooq", lambda s, w=None: self._series())
         market._first_working("rbob", "RB=F", "rb.f")
+
         assert len(self.slept) == market._ATTEMPTS - 1
-        assert self.slept[1] > self.slept[0]
+        for i, waited in enumerate(self.slept):
+            base = retry.BACKOFF * 2**i
+            assert base * (1 - retry.JITTER) <= waited <= base * (1 + retry.JITTER)
 
     def test_an_empty_answer_moves_on_instead_of_retrying(self, monkeypatch):
         """A blocked symbol answers empty every time; retrying only delays
@@ -482,6 +491,25 @@ class TestCbsCacheFallback:
         with pytest.raises(RuntimeError, match="CBS unreachable"):
             cbs.fetch()
 
+    def test_a_transient_failure_is_retried(self, tmp_path, monkeypatch):
+        """The weekly backtest died on `[Errno 101] Network is unreachable`
+        against a host it had reached two hours earlier. The market feeds
+        had retries by then; CBS did not."""
+        monkeypatch.setattr(cbs, "RAW", tmp_path)
+        monkeypatch.setattr(retry.time, "sleep", lambda _: None)
+        calls = []
+
+        def flaky():
+            calls.append(1)
+            if len(calls) < 2:
+                raise ConnectionError("Network is unreachable")
+            pump, _ = synthetic.generate(start="2024-01-01", end="2024-03-01")
+            return pump
+
+        monkeypatch.setattr(cbs, "_download", flaky)
+        assert not cbs.fetch().empty
+        assert len(calls) == 2
+
 
 class TestDegradedInputs:
     """Optional inputs must degrade, not detonate: an unreadable extra
@@ -539,6 +567,65 @@ class TestAdvisoryScraper:
             gla.scrape("<html><body><h1>Koekjes accepteren</h1></body></html>")
 
 
+class TestPriceProbe:
+    """On 7 August 2026 the live page had no price and no fuel label in its
+    text at all. `diagnose()` says *that*; these pin down the tooling that
+    says *where the price went instead*."""
+
+    NEXT_PAGE = """
+    <html><head><title>Adviesprijs</title></head><body>
+      <div id="root"></div>
+      <script id="__NEXT_DATA__" type="application/json">
+        {"props":{"pageProps":{"fuels":[
+          {"name":"Euro 95 (E10)","adviesprijs":2.109},
+          {"name":"Diesel","adviesprijs":1.879}]}}}
+      </script>
+      <script>window.__CONFIG__ = {"apiBase":"/api/v2/brandstofprijzen"};</script>
+    </body></html>
+    """
+
+    def test_finds_a_price_the_text_parser_cannot_see(self):
+        """The decisive case: `to_text()` strips <script>, so a Next.js
+        payload is invisible to both find_price and diagnose -- yet the
+        price is sitting right there in the HTML."""
+        assert gla.find_price(gla.to_text(self.NEXT_PAGE)) is None
+        report = gla.probe(self.NEXT_PAGE)
+        assert "2.109" in report
+        assert "the price is in the HTML after all" in report
+
+    def test_names_the_blob_that_holds_it(self):
+        """Without the script's id, the report says a price exists
+        somewhere and leaves you to find it."""
+        report = gla.probe(self.NEXT_PAGE)
+        assert "__NEXT_DATA__" in report
+        assert "adviesprijs" in report
+
+    def test_parses_an_assignment_not_just_a_bare_payload(self):
+        blobs = dict(gla.embedded_json(self.NEXT_PAGE))
+        assert "<inline>" in blobs
+        assert blobs["<inline>"]["apiBase"] == "/api/v2/brandstofprijzen"
+
+    def test_lists_candidate_endpoints(self):
+        assert "/api/v2/brandstofprijzen" in gla.find_endpoints(self.NEXT_PAGE)
+
+    def test_ignores_assets(self):
+        """Every page links dozens of scripts and none of them are data."""
+        html = '<script src="/_next/static/chunks/api-4f2.js"></script>'
+        assert gla.find_endpoints(html) == []
+
+    def test_rejects_numbers_that_are_not_prices(self):
+        """A page is full of small numbers -- ids, counts, ratings."""
+        assert not gla._price_like(0.5)
+        assert not gla._price_like(2026)
+        assert not gla._price_like(True)
+        assert gla._price_like(2.109)
+        assert gla._price_like("2,109")
+
+    def test_says_so_when_there_is_no_json_at_all(self):
+        report = gla.probe("<html><body><p>Niets hier</p></body></html>")
+        assert "no parseable JSON" in report
+
+
 def pump_fixture() -> pd.DataFrame:
     pump, _ = synthetic.generate(start="2019-01-01", end="2024-12-31")
     return pump
@@ -592,6 +679,66 @@ class TestPanel:
         assert not [c for c in cols if c.startswith(("y_h", "actual_h"))]
         assert "duty_step_h3" in cols
         assert "duty_step_h5" not in cols
+
+    def test_no_feature_changes_when_later_market_data_arrives(self):
+        """A blanket no-lookahead net over every market feature at once.
+
+        The individual features are each written to look backwards, but
+        that is a property of thirty-odd lines that keep being added to.
+        This checks the invariant itself: rebuild the panel with a month
+        of extra wholesale data and the rows that were already there must
+        come out bit-for-bit identical.
+        """
+        pump, market = synthetic.generate(start="2019-01-01", end="2021-12-31")
+        cutoff = pd.Timestamp("2021-06-30")
+
+        short = build_panel(pump[pump["date"] <= cutoff],
+                            market[market["date"] <= cutoff])
+        full = build_panel(pump, market)
+
+        overlap = full[full["date"].isin(short["date"])].reset_index(drop=True)
+        short = short.reset_index(drop=True)
+        # Targets legitimately differ -- they are the future, which is the
+        # whole point. Everything a model reads must not.
+        from benzine.features import feature_columns
+
+        for col in feature_columns(short, horizon=3):
+            pd.testing.assert_series_equal(
+                short[col], overlap[col], check_names=False,
+                obj=f"feature {col!r} changed when future data was added",
+            )
+
+
+class TestCrudeIsDeliberatelyUnused:
+    """Brent is downloaded and not used as a feature. That is a measured
+    decision -- both variants scored worse than gasoline alone on five
+    years of CBS data -- and these keep it from being quietly undone or
+    quietly rediscovered."""
+
+    @pytest.fixture(scope="class")
+    def panel(self):
+        pump, market = synthetic.generate(start="2019-01-01", end="2023-12-31")
+        return build_panel(pump, market)
+
+    def test_no_crude_feature_reaches_the_model(self, panel):
+        from benzine.features import feature_columns
+
+        cols = feature_columns(panel, horizon=1)
+        assert not [c for c in cols if c.startswith(("crude_", "crack"))]
+
+    def test_the_generator_still_keeps_crude_and_gasoline_apart(self):
+        """Guards the generator, not the model.
+
+        Before August 2026 the synthetic Brent was an exact affine
+        function of the gasoline series, so crude carried no information
+        of its own and any experiment run against this generator would
+        have been meaningless. Whoever tries crude features again needs
+        the generator to still be honest about that.
+        """
+        _, market = synthetic.generate(start="2019-01-01", end="2023-12-31")
+        crack = market["rbob_eur_l"] - market["brent_eur_l"]
+        assert crack.std() > 0.001
+        assert abs(market["brent_eur_l"].corr(crack)) < 0.99
 
 
 class TestAdvisoryAnchor:

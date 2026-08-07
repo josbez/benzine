@@ -16,9 +16,11 @@ from __future__ import annotations
 import datetime as dt
 from pathlib import Path
 
-# Both live feeds publish at most once a day, so anything fetched within
-# the last twelve hours is as current as the source can be.
-DEFAULT_MAX_AGE = dt.timedelta(hours=12)
+# Short enough that every scheduled run refetches. The forecast job runs
+# three times a day, five hours apart at the closest, so anything longer
+# would have the later runs republish the earlier run's numbers -- the
+# cache would silently cancel out the extra runs.
+DEFAULT_MAX_AGE = dt.timedelta(hours=4)
 
 
 def is_fresh(path: Path, max_age: dt.timedelta = DEFAULT_MAX_AGE) -> bool:

@@ -204,6 +204,31 @@ def _add_market_features(panel: pd.DataFrame, mk: pd.DataFrame) -> None:
     panel["mkt_vol_20d"] = vol.reindex(idx).to_numpy()
 
 
+# Brent is fetched and deliberately not used. That is a measured result,
+# not an oversight, and it is recorded here so the next person to notice
+# the unused column does not spend a day rediscovering it.
+#
+# Two variants were backtested on five years of CBS data, 1827 identical
+# origins, against the GBM:
+#
+#   feature set              skill vs naive, h1 -> h5
+#   baseline (gasoline only) 14.3  15.8  12.9  13.6  14.1
+#   + crude changes + crack  15.3  14.3  13.0  12.1  11.0
+#   + crack spread only      14.3  14.4  12.7  12.0  12.6
+#
+# Both were worse, and the full set degraded with horizon, which is what
+# overfitting looks like. The reason is not mysterious in hindsight:
+# crude and refined gasoline move together on almost every day, so crude
+# columns are near-duplicates of features the model already has. A supply
+# shock does land in crude first -- but the gasoline contract carries the
+# same story hours later, and the model reads that instead.
+#
+# What this does *not* establish is behaviour during a genuine supply
+# shock. 1827 origins are overwhelmingly ordinary days, and average MAE
+# cannot see the tail. If crude is tried again, score the shock days
+# separately rather than re-running the same average.
+
+
 def _add_pump_history(panel: pd.DataFrame, pump: pd.DataFrame) -> None:
     """Recent observed pump momentum, measured back from the anchor date."""
     series = pump.set_index("date")["euro95"]

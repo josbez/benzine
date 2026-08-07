@@ -12,6 +12,7 @@ you need. Until it has depth, the model falls back to CBS alone.
 from __future__ import annotations
 
 import datetime as dt
+import json
 import re
 
 import pandas as pd
@@ -148,3 +149,188 @@ def load() -> pd.DataFrame:
     if not _STORE.exists():
         return pd.DataFrame(columns=["date", "gla_euro95"])
     return pd.read_csv(_STORE, parse_dates=["date"])
+
+
+# --------------------------------------------------------------------------
+# finding the price when it is not in the page text
+#
+# `diagnose()` answers "is there a price in the text?". When the answer is
+# no, as it was on 7 August 2026, the next question is "then where is it?"
+# -- and that question cannot be answered from a laptop that cannot reach
+# the page. So it is answered here, by code that runs on the runner.
+#
+# The first place to look is deliberately *inside* the script tags that
+# `to_text()` strips. Server-rendered frameworks (Next.js, Nuxt, SvelteKit)
+# ship the page's data as a JSON blob in the HTML, so "rendered
+# client-side" and "absent from the HTML" are not the same thing, and the
+# verdict in `diagnose()` cannot tell them apart.
+
+_SCRIPT = re.compile(r"<script([^>]*)>(.*?)</script>", re.S | re.I)
+
+# Paths and URLs that look like they return data rather than markup.
+_ENDPOINT = re.compile(
+    r"""["'`](https?://[^"'`\s<>]+|/[^"'`\s<>]*)"""
+    r"""(?=[^"'`]*?(?:api|graphql|\.json|/data/))([^"'`\s<>]*)["'`]""",
+    re.I,
+)
+
+# Keys worth reporting even when their value is not price-shaped: they say
+# which part of the payload to look in.
+_DATA_KEYS = (
+    "euro", "benzine", "e10", "advies", "brandstof", "fuel", "prijs", "price",
+)
+
+_MAX_HITS = 12
+
+
+def probe(html: str | None = None, follow: bool = False) -> str:
+    """Report where on the page the advisory price might actually live.
+
+    Args:
+        html: page source; fetched if omitted.
+        follow: also request the candidate endpoints found in the markup
+            and report which of them return a price. Off by default so the
+            report stays offline-safe.
+    """
+    if html is None:
+        response = requests.get(_URL, timeout=_TIMEOUT, headers=_HEADERS)
+        response.raise_for_status()
+        html = response.text
+
+    lines = [f"page source: {len(html)} chars"]
+    lines += _report_embedded_json(html)
+
+    endpoints = find_endpoints(html)
+    lines.append("")
+    lines.append(f"candidate data endpoints in the markup: {len(endpoints)}")
+    lines += [f"  {url}" for url in endpoints[:_MAX_HITS]]
+
+    if follow and endpoints:
+        lines.append("")
+        lines.append("fetching candidates:")
+        lines += _report_fetched(endpoints[:_MAX_HITS])
+
+    return "\n".join(lines)
+
+
+def _report_embedded_json(html: str) -> list[str]:
+    """Prices hiding in JSON inside <script> tags."""
+    lines = []
+    for label, payload in embedded_json(html):
+        prices, keys = [], []
+        for path, value in _walk(payload):
+            if _price_like(value):
+                prices.append(f"{path} = {value!r}")
+            elif any(k in path.lower() for k in _DATA_KEYS):
+                keys.append(f"{path} = {_short(value)}")
+
+        lines.append("")
+        lines.append(f"embedded JSON {label}: {len(prices)} price-shaped values")
+        lines += [f"  PRICE {p}" for p in prices[:_MAX_HITS]]
+        lines += [f"  key   {k}" for k in keys[:_MAX_HITS]]
+        if prices:
+            lines.append(
+                "  VERDICT: the price is in the HTML after all -- parse this "
+                "JSON blob instead of the page text."
+            )
+    if not lines:
+        lines.append("")
+        lines.append("no parseable JSON found in any <script> tag")
+    return lines
+
+
+def embedded_json(html: str):
+    """Yield (label, parsed) for every script tag holding JSON.
+
+    Covers the two shapes that matter: a `<script type="application/json">`
+    whose whole body is the payload, and an assignment such as
+    `window.__NUXT__ = {...}` where the payload is a substring.
+    """
+    for attrs, body in _SCRIPT.findall(html):
+        body = body.strip()
+        if not body:
+            continue
+        label = _script_label(attrs)
+        for candidate in (body, _braced(body)):
+            if not candidate:
+                continue
+            try:
+                yield label, json.loads(candidate)
+            except (ValueError, TypeError):
+                continue
+            break
+
+
+def _script_label(attrs: str) -> str:
+    ident = re.search(r"""id=["']([^"']+)["']""", attrs, re.I)
+    kind = re.search(r"""type=["']([^"']+)["']""", attrs, re.I)
+    return ident.group(1) if ident else (kind.group(1) if kind else "<inline>")
+
+
+def _braced(body: str) -> str | None:
+    """The outermost {...} in a script body, for `window.x = {...};` forms."""
+    start, end = body.find("{"), body.rfind("}")
+    return body[start : end + 1] if 0 <= start < end else None
+
+
+def _walk(node, path: str = "$"):
+    if isinstance(node, dict):
+        for key, value in node.items():
+            yield from _walk(value, f"{path}.{key}")
+    elif isinstance(node, list):
+        # Only the first few entries: a price list is short, and a page's
+        # worth of navigation items is not worth printing.
+        for i, value in enumerate(node[:20]):
+            yield from _walk(value, f"{path}[{i}]")
+    else:
+        yield path, node
+
+
+def _price_like(value) -> bool:
+    """A number that could be a euro-per-litre pump price."""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return 0.8 < float(value) < 4.0
+    if isinstance(value, str) and _PRICE.fullmatch(value.strip()):
+        return True
+    return False
+
+
+def _short(value, limit: int = 60) -> str:
+    text = repr(value)
+    return text if len(text) <= limit else text[:limit] + "..."
+
+
+def find_endpoints(html: str) -> list[str]:
+    """Distinct API-ish URLs mentioned anywhere in the page source."""
+    seen = {}
+    for head, tail in _ENDPOINT.findall(html):
+        url = (head + tail).strip()
+        # Assets are the bulk of the matches and never carry prices.
+        if url.endswith((".js", ".css", ".png", ".jpg", ".svg", ".woff2")):
+            continue
+        seen.setdefault(url, None)
+    return sorted(seen)
+
+
+def _report_fetched(endpoints: list[str]) -> list[str]:
+    lines = []
+    for url in endpoints:
+        target = url if url.startswith("http") else _origin() + url
+        try:
+            response = requests.get(target, timeout=_TIMEOUT, headers=_HEADERS)
+            body = response.text
+        except Exception as exc:  # noqa: BLE001 - this is the report
+            lines.append(f"  {target} -> {type(exc).__name__}: {exc}")
+            continue
+
+        prices = _PRICE.findall(body) + re.findall(r"\b[123]\.\d{2,3}\b", body)
+        verdict = f"{len(prices)} price-shaped tokens {prices[:5]}"
+        lines.append(f"  {target} -> HTTP {response.status_code}, {verdict}")
+    return lines
+
+
+def _origin() -> str:
+    scheme, _, rest = _URL.partition("://")
+    return f"{scheme}://{rest.split('/')[0]}"

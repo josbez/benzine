@@ -55,12 +55,25 @@ no server. Two GitHub Actions workflows cover it, free:
 
 | Workflow | When | What |
 |---|---|---|
-| `daily.yml` | 05:00 UTC daily | scrape the advisory price, rebuild the forecast, publish to GitHub Pages |
+| `daily.yml` | 03:00, 12:00, 17:00 Dutch time | scrape the advisory price, rebuild the forecast, publish to GitHub Pages |
 | `backtest.yml` | Mondays | re-run the walk-forward evaluation, commit the scores |
 
-They are split because the daily run takes well under a minute while the
-backtest takes several — and its scores barely move day to day. The daily
-job reads the cached scores from `data/backtest_metrics.json`.
+They are split because the forecast run takes well under a minute while
+the backtest takes several — and its scores barely move day to day. The
+forecast job reads the cached scores from `data/backtest_metrics.json`.
+
+The three daily runs are for the wholesale side: RBOB and Brent trade
+through the afternoon, so the midday and late runs see the day's move
+instead of yesterday's close. Advisory prices are published the evening
+before and CBS releases on Thursday mornings, so the first run of the day
+is the one that matters for those. Cron is UTC and GitHub does not do
+daylight saving, so the schedule is set for CEST and slips an hour in
+local terms over the winter, which changes nothing that matters.
+
+The source caches expire in hours (four for the market feeds, eight for
+the weekly CBS table) rather than half a day. That is not a detail: with
+a cache longer than the gap between runs, the later runs would republish
+the earlier one's numbers and the extra runs would buy nothing.
 
 The site is published by pushing `web/` to a **`gh-pages`** branch, not
 through the Pages deployment API. Set **Settings → Pages → Source: Deploy
@@ -71,42 +84,50 @@ The branch is force-pushed as a single commit each time. It holds
 generated output only, so its history is worth nothing and letting it grow
 would cost clone time forever.
 
-### Pages does not currently work, and it is not the code
+Every run ends with a healthcheck that polls the live `forecast.json`
+until it carries the `generated_at` of the build that just ran, and fails
+the run otherwise. A push to `gh-pages` reports success the moment the
+branch moves, which is not the same thing as the site being updated — and
+a green run that published nothing is worse than a red one, because
+nobody goes looking.
 
-The API route (`configure-pages` / `upload-pages-artifact` /
-`deploy-pages`) was tried first: it repeatedly created a deployment and
-then sat on `deployment_in_progress` until it timed out. Switching to a
-branch push was expected to sidestep that. **It did not.** Pushing to
-`gh-pages` triggers GitHub's own *pages build and deployment* workflow,
-which runs `deploy-pages` internally and stalls in exactly the same place
-(run `31110887125`). Both routes end in the same stuck deployment, and
-`https://josbez.github.io/benzine/` has never served anything.
+<details>
+<summary>The two days Pages did not deploy at all (6–7 Aug 2026)</summary>
 
-So this is a Pages configuration problem on the repository, not something
-the workflow can route around. To clear it:
+Worth keeping, because the conclusion that felt obvious was wrong twice.
 
-1. Check **Settings → Pages** — with a branch push the source must be
-   *Deploy from a branch*, not *GitHub Actions*. A mismatch here produces
-   precisely this symptom.
-2. Cancel any deployment stuck in the `github-pages` environment
-   (`gh api repos/josbez/benzine/deployments` → `POST .../statuses` with
-   `state=inactive`, or delete them), then re-run the daily workflow.
-3. Check whether `github-pages` has environment protection rules waiting
-   on an approval nobody is giving.
-4. If none of that clears it, publish `web/` to Netlify or Cloudflare
-   Pages instead — the site is three static files and one JSON, so the
-   hosting choice carries no weight.
+Every Pages deployment stalled on `deployment_in_progress` until it timed
+out — first through the deployment API (`configure-pages` /
+`upload-pages-artifact` / `deploy-pages`), and then, after switching to a
+branch push, through GitHub's own *pages build and deployment* workflow,
+which runs `deploy-pages` internally and stalled identically (run
+`31110887125`). The site had never served anything.
 
-The daily run now ends with a healthcheck that polls the live
-`forecast.json` until it carries the `generated_at` of the build that just
-ran, and fails otherwise. Until the above is sorted the workflow will
-therefore go red every day — deliberately, because the alternative is a
-green run publishing to a site nobody is serving. The advisory price is
-committed long before that step, so a red run no longer costs any data.
+Two theories were written up confidently and both were wrong. First, that
+a branch push could not be blocked by a stall in the deployment API — the
+logs showed exactly that happening. Then, that this had to be a Pages
+*configuration* problem: **Settings → Pages** turned out to be correct all
+along (*Deploy from a branch*, `gh-pages` / `(root)`), and billing was
+fine too.
 
-The branch push is kept regardless: it is less machinery than the artifact
-route (no artifact, no environment, no deployment to poll), which is a
-reason to prefer it but was never a reason to expect it to fix the stall.
+What it actually was: a GitHub-wide Actions incident whose status updates
+named Pages explicitly. Nothing in this repository was ever involved. The
+next scheduled run after the incident cleared (`31152665906`) published
+and passed the healthcheck in 70 seconds, with no change on our side.
+
+The lesson for the next infrastructure failure here: a convincing
+explanation is not evidence. Check the platform status page before
+writing a diagnosis, and treat a verified run as the only thing that
+closes the question.
+
+If Pages stalls again: check status.github.com first, then for a
+deployment stuck in the `github-pages` environment, then for environment
+protection rules waiting on an approval nobody is giving. If it persists
+with the platform healthy, publish `web/` to Netlify or Cloudflare Pages
+instead — three static files and one JSON, so the hosting choice carries
+no weight.
+
+</details>
 
 Two things worth knowing:
 
@@ -183,6 +204,34 @@ RBOB stands in for the real EBOB Rotterdam assessment, which is a paid
 Argus/Platts product. Swapping in a licensed EBOB feed means changing
 `sources/market.py` and nothing else.
 
+**Brent is downloaded and deliberately not used as a feature.** It was
+tried, measured, and dropped — recorded here so the unused column does not
+look like an oversight.
+
+The argument for it was good: a supply shock (a strait threatened, an OPEC
+decision) lands in crude first and most cleanly, and the crack spread
+(gasoline minus the crude inside it) says whether a wholesale move will
+hold or unwind. Backtested on five years of CBS data over 1827 identical
+origins, against the GBM:
+
+| feature set | skill vs naive, h1 → h5 |
+|---|---|
+| baseline, gasoline only | 14.3  15.8  12.9  13.6  14.1 |
+| + crude changes + crack | 15.3  14.3  13.0  12.1  **11.0** |
+| + crack spread only | 14.3  14.4  12.7  12.0  12.6 |
+
+Both variants were worse, and the full set degraded with horizon, which is
+the signature of overfitting rather than of noise. In hindsight the reason
+is plain: crude and refined gasoline move together on almost every day, so
+crude columns are near-duplicates of features the model already has. The
+shock does reach crude first — and the gasoline contract tells the same
+story hours later, which is what the model was already reading.
+
+What this does **not** establish is behaviour during a real supply shock.
+1827 origins are overwhelmingly ordinary days and an average MAE cannot
+see the tail. Anyone revisiting this should score the shock days
+separately instead of re-running the same average.
+
 Each market series is tried against Yahoo Finance first and Stooq second,
 and each provider is retried three times with exponential backoff before
 the next one is tried. That redundancy is not paranoia: Stooq serves a
@@ -236,9 +285,17 @@ tests/           timing and leakage guards
   output `data_source: synthetic`, which the web app surfaces as a warning
   banner. Backtest numbers on synthetic data verify the machinery; they say
   nothing about real-world accuracy.
-- **The GLA scraper is untested against the live page.** It parses the
-  page's text (tags stripped) and raises with an excerpt rather than
-  guessing, so a failure in CI shows what the page actually contained.
+- **The GLA scraper does not currently work, so the advisory-price history
+  is still empty.** As of 7 August 2026 the live page carries no price and
+  no fuel label anywhere in its text: the figures arrive after render. The
+  daily run therefore opens an issue instead of failing, and attaches
+  `make probe`, which looks inside the `<script>` tags the text parser
+  strips and follows the API-ish URLs the page mentions. Server-rendered
+  frameworks ship their data as JSON in the HTML, so "rendered
+  client-side" and "absent from the HTML" are not the same thing, and the
+  scraper's own verdict cannot tell them apart. Until this is fixed the
+  anchor stays on CBS and every passing day is a day of history that
+  cannot be recovered.
 - **The advisory price only becomes the anchor after ~10 overlapping days.**
   It is a list price from the five majors while CBS is volume-weighted
   across all stations including discounters, so the two sit cents apart.
