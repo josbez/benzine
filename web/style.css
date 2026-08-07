@@ -766,6 +766,15 @@ tbody tr:last-child td { border-bottom: none; }
   gap: 16px;
 }
 
+.history-entry.is-today {
+  border: 2px solid var(--primary);
+  background: var(--surface-container);
+}
+
+.history-entry.is-today .history-entry-rel {
+  color: var(--primary);
+}
+
 .history-entry-head {
   display: flex;
   justify-content: space-between;

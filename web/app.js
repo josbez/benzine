@@ -68,7 +68,7 @@ function renderHero(data) {
     ? 'van vandaag'
     : `van ${a.staleness_days} dag${a.staleness_days === 1 ? '' : 'en'} geleden`;
   document.getElementById('anchor-meta').textContent =
-    `${a.source} · ${when} (${a.date})`;
+    `${a.source} · ${when} (${formatDateDutch(parseDate(a.date))})`;
   document.getElementById('fuel-line').textContent =
     `${data.fuel} · landelijk gemiddelde`;
 

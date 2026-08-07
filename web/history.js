@@ -112,13 +112,14 @@ function render() {
 
 function entryCard(entry) {
   const rel = relativeDayLabel(entry.date);
+  const isToday = rel === 'Vandaag';
   const abs = formatDateDutch(entry.date);
   const chip = entry.deltaCents === null
     ? { className: 'chip-flat', label: '—' }
     : trendChip(entry.deltaCents);
 
   return `
-    <div class="history-entry">
+    <div class="history-entry${isToday ? ' is-today' : ''}">
       <div class="history-entry-head">
         <div>
           <p class="history-entry-rel">${rel}</p>

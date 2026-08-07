@@ -3,7 +3,6 @@
  */
 
 const DOW = ['zo', 'ma', 'di', 'wo', 'do', 'vr', 'za'];
-const MONTHS_SHORT = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
 
 const fmtPrice = (v) => '€ ' + v.toFixed(3).replace('.', ',');
 
@@ -19,7 +18,9 @@ function parseDate(s) {
 }
 
 function formatDateDutch(date) {
-  return `${date.getUTCDate()} ${MONTHS_SHORT[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
+  const dd = String(date.getUTCDate()).padStart(2, '0');
+  const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
+  return `${dd}/${mm}/${date.getUTCFullYear()}`;
 }
 
 // Relative label vs. real today's date (not vs. the freshest data point --
