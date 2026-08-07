@@ -203,48 +203,30 @@ def _add_market_features(panel: pd.DataFrame, mk: pd.DataFrame) -> None:
     vol = rbob.diff().rolling(20).std()
     panel["mkt_vol_20d"] = vol.reindex(idx).to_numpy()
 
-    _add_crude_features(panel, mk)
 
-
-def _add_crude_features(panel: pd.DataFrame, mk: pd.DataFrame) -> None:
-    """Crude, and the refining margin between crude and gasoline.
-
-    What is being forecast is a Dutch pump price, and crude never reaches
-    a Dutch pump directly -- it reaches it through the refined product.
-    So Brent enters here as a *driver* of the gasoline price, not as a
-    second cost anchor: the cost base in `_add_cost_gap` stays the refined
-    series, because that is what a Dutch retailer actually buys.
-
-    What crude adds is the **crack spread**: whether a gasoline move will
-    hold. A move that sits only in the crack is a refining-margin story
-    and tends to unwind within weeks; a crude-driven move does not. Same
-    size at the wholesale end, different pass-through at the pump.
-
-    Only the crack, deliberately. Crude *changes* were tried too -- the
-    same windows as the gasoline series, plus the move since the anchor --
-    and they made the model worse: skill at five days fell from 14.1% to
-    11.0% on five years of CBS data, degrading with horizon, which is what
-    overfitting looks like. In hindsight that is the expected result.
-    Crude and refined gasoline move together on almost every day, so those
-    columns were near-duplicates of features the model already had, and
-    the extra ways to fit noise cost more than the signal they added. The
-    crack is the one piece that is genuinely orthogonal: it is the
-    *difference* between the two series, which is exactly the part the
-    gasoline price alone cannot tell you.
-
-    No up/down split here, unlike the pump-side features: "rockets and
-    feathers" is *retail* behaviour, and the crude-to-product leg is fast
-    and close to symmetric.
-    """
-    brent = mk["brent_eur_l"]
-    rbob = mk["rbob_eur_l"]
-    idx = panel["date"]
-
-    crack = (rbob - brent).reindex(idx)
-    panel["crack"] = crack.to_numpy()
-    panel["crack_dev"] = (
-        crack - crack.rolling(90, min_periods=20).mean()
-    ).to_numpy()
+# Brent is fetched and deliberately not used. That is a measured result,
+# not an oversight, and it is recorded here so the next person to notice
+# the unused column does not spend a day rediscovering it.
+#
+# Two variants were backtested on five years of CBS data, 1827 identical
+# origins, against the GBM:
+#
+#   feature set              skill vs naive, h1 -> h5
+#   baseline (gasoline only) 14.3  15.8  12.9  13.6  14.1
+#   + crude changes + crack  15.3  14.3  13.0  12.1  11.0
+#   + crack spread only      14.3  14.4  12.7  12.0  12.6
+#
+# Both were worse, and the full set degraded with horizon, which is what
+# overfitting looks like. The reason is not mysterious in hindsight:
+# crude and refined gasoline move together on almost every day, so crude
+# columns are near-duplicates of features the model already has. A supply
+# shock does land in crude first -- but the gasoline contract carries the
+# same story hours later, and the model reads that instead.
+#
+# What this does *not* establish is behaviour during a genuine supply
+# shock. 1827 origins are overwhelmingly ordinary days, and average MAE
+# cannot see the tail. If crude is tried again, score the shock days
+# separately rather than re-running the same average.
 
 
 def _add_pump_history(panel: pd.DataFrame, pump: pd.DataFrame) -> None:

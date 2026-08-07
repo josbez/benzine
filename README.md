@@ -204,21 +204,33 @@ RBOB stands in for the real EBOB Rotterdam assessment, which is a paid
 Argus/Platts product. Swapping in a licensed EBOB feed means changing
 `sources/market.py` and nothing else.
 
-**Crude enters as a driver, not as a second cost anchor.** A Dutch
-retailer buys finished gasoline, so the cost base the margin is measured
-against stays the refined series. Brent earns its place for two other
-reasons. A supply shock — a strait threatened, an OPEC decision — lands in
-crude first and most cleanly, while the gasoline contract carries it mixed
-with refinery outages, blend-season switches and US driving demand that
-have nothing to do with a Rotterdam barge. And the **crack spread**
-(gasoline minus the crude inside it) says whether a wholesale move will
-hold: a move that is only in the crack is a refining-margin story that
-tends to unwind within weeks, while a crude-driven move does not. Same
-size at the wholesale end, different pass-through at the pump.
+**Brent is downloaded and deliberately not used as a feature.** It was
+tried, measured, and dropped — recorded here so the unused column does not
+look like an oversight.
 
-Unlike the pump-side features these carry no up/down split. "Rockets and
-feathers" is retail behaviour; the crude-to-product leg is fast and close
-to symmetric.
+The argument for it was good: a supply shock (a strait threatened, an OPEC
+decision) lands in crude first and most cleanly, and the crack spread
+(gasoline minus the crude inside it) says whether a wholesale move will
+hold or unwind. Backtested on five years of CBS data over 1827 identical
+origins, against the GBM:
+
+| feature set | skill vs naive, h1 → h5 |
+|---|---|
+| baseline, gasoline only | 14.3  15.8  12.9  13.6  14.1 |
+| + crude changes + crack | 15.3  14.3  13.0  12.1  **11.0** |
+| + crack spread only | 14.3  14.4  12.7  12.0  12.6 |
+
+Both variants were worse, and the full set degraded with horizon, which is
+the signature of overfitting rather than of noise. In hindsight the reason
+is plain: crude and refined gasoline move together on almost every day, so
+crude columns are near-duplicates of features the model already has. The
+shock does reach crude first — and the gasoline contract tells the same
+story hours later, which is what the model was already reading.
+
+What this does **not** establish is behaviour during a real supply shock.
+1827 origins are overwhelmingly ordinary days and an average MAE cannot
+see the tail. Anyone revisiting this should score the shock days
+separately instead of re-running the same average.
 
 Each market series is tried against Yahoo Finance first and Stooq second,
 and each provider is retried three times with exponential backoff before

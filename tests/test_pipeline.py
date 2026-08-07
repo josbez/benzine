@@ -709,73 +709,36 @@ class TestPanel:
             )
 
 
-class TestCrudeFeatures:
-    """Brent is downloaded, and until August 2026 it was never used. A
-    Dutch pump price is set off the refined product, but crude is what
-    moves that product -- and a crude-driven move behaves differently from
-    a refining-margin one."""
+class TestCrudeIsDeliberatelyUnused:
+    """Brent is downloaded and not used as a feature. That is a measured
+    decision -- both variants scored worse than gasoline alone on five
+    years of CBS data -- and these keep it from being quietly undone or
+    quietly rediscovered."""
 
     @pytest.fixture(scope="class")
     def panel(self):
         pump, market = synthetic.generate(start="2019-01-01", end="2023-12-31")
         return build_panel(pump, market)
 
-    def test_crack_is_gasoline_minus_crude(self, panel):
-        pump, market = synthetic.generate(start="2019-01-01", end="2023-12-31")
-        mk = market.set_index("date")
-        row = panel.iloc[400]
-        expected = mk.loc[row["date"], "rbob_eur_l"] - mk.loc[row["date"], "brent_eur_l"]
-        assert row["crack"] == pytest.approx(expected)
-
-    def test_only_the_crack_reaches_the_model(self, panel):
-        """Crude *changes* were measured and dropped: they duplicated the
-        gasoline features and cost 3 points of skill at five days. Keeping
-        that decision visible here so it is not silently re-added."""
+    def test_no_crude_feature_reaches_the_model(self, panel):
         from benzine.features import feature_columns
 
         cols = feature_columns(panel, horizon=1)
-        assert "crack" in cols
-        assert "crack_dev" in cols
-        assert not [c for c in cols if c.startswith("crude_")]
+        assert not [c for c in cols if c.startswith(("crude_", "crack"))]
 
-    def test_crude_carries_information_gasoline_does_not(self, panel):
-        """Guards the generator as much as the features.
+    def test_the_generator_still_keeps_crude_and_gasoline_apart(self):
+        """Guards the generator, not the model.
 
         Before August 2026 the synthetic Brent was an exact affine
-        function of the gasoline series, which made the crack a rescaled
-        copy of the gasoline price and no test here could have failed.
-        If that regresses, this catches it.
+        function of the gasoline series, so crude carried no information
+        of its own and any experiment run against this generator would
+        have been meaningless. Whoever tries crude features again needs
+        the generator to still be honest about that.
         """
-        assert panel["crack"].std() > 0.001
-        assert abs(panel["crack"].corr(panel["margin"])) < 0.99
-
-    def test_a_crude_spike_moves_the_crude_features_only(self):
-        """The distinction the features exist to make: a barrel that got
-        more expensive, versus a refining margin that widened."""
-        pump, market = synthetic.generate(start="2020-01-01", end="2020-12-31")
-        spiked = market.copy()
-        day = spiked["date"] >= pd.Timestamp("2020-06-01")
-        # Crude jumps and gasoline follows it one-for-one: the crack is
-        # unchanged, so this is a pure crude event.
-        spiked.loc[day, "brent_eur_l"] += 0.10
-        spiked.loc[day, "rbob_eur_l"] += 0.10
-
-        base = build_panel(pump, market)
-        after = build_panel(pump, spiked)
-        # The day the jump lands: the day before is still unspiked, so the
-        # one-day change carries it. By the next day it is in both terms.
-        row = (base["date"] == pd.Timestamp("2020-06-01")).values
-
-        # A pure crude event leaves the crack alone -- that is the whole
-        # point of measuring the difference rather than either series.
-        assert after.loc[row, "crack"].iloc[0] == pytest.approx(
-            base.loc[row, "crack"].iloc[0]
-        )
-        # ...while a refining-margin event moves it.
-        widened = market.copy()
-        widened.loc[day, "rbob_eur_l"] += 0.10
-        crack_after = build_panel(pump, widened).loc[row, "crack"].iloc[0]
-        assert crack_after - base.loc[row, "crack"].iloc[0] == pytest.approx(0.10)
+        _, market = synthetic.generate(start="2019-01-01", end="2023-12-31")
+        crack = market["rbob_eur_l"] - market["brent_eur_l"]
+        assert crack.std() > 0.001
+        assert abs(market["brent_eur_l"].corr(crack)) < 0.99
 
 
 class TestAdvisoryAnchor:

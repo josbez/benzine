@@ -58,7 +58,7 @@
     "model":"ecm",
     "horizon":1,
     "n":1827,
-    "mae_cents":2.1671,
+    "mae_cents":2.1672,
     "rmse_cents":3.6041,
     "mae_naive_cents":2.4114,
     "skill_vs_naive":0.1013,
@@ -69,7 +69,7 @@
     "model":"ecm",
     "horizon":2,
     "n":1827,
-    "mae_cents":2.4035,
+    "mae_cents":2.4036,
     "rmse_cents":3.9201,
     "mae_naive_cents":2.6551,
     "skill_vs_naive":0.0947,
@@ -113,55 +113,55 @@
     "model":"gbm",
     "horizon":1,
     "n":1827,
-    "mae_cents":2.0676,
-    "rmse_cents":3.4013,
+    "mae_cents":2.0655,
+    "rmse_cents":3.3831,
     "mae_naive_cents":2.4114,
-    "skill_vs_naive":0.1426,
-    "coverage_80":0.7969,
-    "pinball":0.008
+    "skill_vs_naive":0.1435,
+    "coverage_80":0.7833,
+    "pinball":0.0079
   },
   {
     "model":"gbm",
     "horizon":2,
     "n":1827,
-    "mae_cents":2.272,
-    "rmse_cents":3.7016,
+    "mae_cents":2.2366,
+    "rmse_cents":3.636,
     "mae_naive_cents":2.6551,
-    "skill_vs_naive":0.1443,
-    "coverage_80":0.7674,
-    "pinball":0.0089
+    "skill_vs_naive":0.1576,
+    "coverage_80":0.7953,
+    "pinball":0.0088
   },
   {
     "model":"gbm",
     "horizon":3,
     "n":1827,
-    "mae_cents":2.5219,
-    "rmse_cents":4.0,
+    "mae_cents":2.5138,
+    "rmse_cents":3.9812,
     "mae_naive_cents":2.8876,
-    "skill_vs_naive":0.1266,
-    "coverage_80":0.7778,
-    "pinball":0.0098
+    "skill_vs_naive":0.1294,
+    "coverage_80":0.7909,
+    "pinball":0.0097
   },
   {
     "model":"gbm",
     "horizon":4,
     "n":1827,
-    "mae_cents":2.7439,
-    "rmse_cents":4.3169,
+    "mae_cents":2.6943,
+    "rmse_cents":4.2681,
     "mae_naive_cents":3.119,
-    "skill_vs_naive":0.1202,
-    "coverage_80":0.786,
-    "pinball":0.0106
+    "skill_vs_naive":0.1362,
+    "coverage_80":0.7767,
+    "pinball":0.0104
   },
   {
     "model":"gbm",
     "horizon":5,
     "n":1827,
-    "mae_cents":2.9312,
-    "rmse_cents":4.5834,
+    "mae_cents":2.879,
+    "rmse_cents":4.5262,
     "mae_naive_cents":3.3536,
-    "skill_vs_naive":0.1259,
-    "coverage_80":0.7767,
-    "pinball":0.0114
+    "skill_vs_naive":0.1415,
+    "coverage_80":0.7833,
+    "pinball":0.0112
   }
 ]
