@@ -5,7 +5,7 @@
  * page self-contained. Shared formatting helpers live in shared.js.
  */
 
-const CHART_DAYS = 30; // of history to show alongside the 5-day forecast
+const CHART_DAYS_DEFAULT = 30; // of history to show alongside the 5-day forecast
 
 init();
 
@@ -38,9 +38,14 @@ async function init() {
   document.getElementById('footer').textContent =
     'bijgewerkt ' + new Date(data.generated_at).toLocaleString('nl-NL');
 
-  const chart = new FanChart(document.getElementById('chart'), data);
+  const chart = new FanChart(document.getElementById('chart'), data, CHART_DAYS_DEFAULT);
   chart.draw();
   window.addEventListener('resize', () => chart.draw());
+
+  document.getElementById('chart-range').addEventListener('change', (ev) => {
+    chart.historyDays = Number(ev.target.value);
+    chart.draw();
+  });
 }
 
 function showLoadError() {
@@ -191,9 +196,10 @@ function renderSkill(data) {
 /* -- chart ------------------------------------------------------------- */
 
 class FanChart {
-  constructor(svg, data) {
+  constructor(svg, data, historyDays) {
     this.svg = svg;
     this.data = data;
+    this.historyDays = historyDays;
     this.tooltip = document.getElementById('tooltip');
     this.NS = 'http://www.w3.org/2000/svg';
     this.bindPointer();
@@ -214,7 +220,7 @@ class FanChart {
     svg.setAttribute('height', height);
     svg.innerHTML = '';
 
-    const history = data.history.slice(-CHART_DAYS).map((d) => ({
+    const history = data.history.slice(-this.historyDays).map((d) => ({
       t: parseDate(d.date).getTime(), v: d.price,
     }));
     const anchorT = parseDate(data.anchor.date).getTime();

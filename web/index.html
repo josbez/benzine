@@ -52,7 +52,17 @@
         </section>
 
         <section class="card">
-          <h2 class="eyebrow">Komende 5 dagen</h2>
+          <div class="chart-head">
+            <h2 class="eyebrow">Komende 5 dagen</h2>
+            <div class="chart-controls">
+              <select id="chart-range" class="range-select" aria-label="Periode geschiedenis">
+                <option value="5">5 dagen</option>
+                <option value="30" selected>1 maand</option>
+                <option value="90">3 maanden</option>
+              </select>
+              <a class="btn btn-outline" href="history.html">Geschiedenis</a>
+            </div>
+          </div>
           <div class="chart-shell">
             <svg class="chart" id="chart" role="img"
                  aria-label="Benzineprijs van de afgelopen weken en de verwachting voor de komende vijf dagen, met onzekerheidsband."></svg>

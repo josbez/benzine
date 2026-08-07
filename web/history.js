@@ -43,6 +43,10 @@ async function init() {
   }
 
   document.getElementById('search-input').addEventListener('input', render);
+  document.getElementById('range-select').addEventListener('change', () => {
+    visibleCount = PAGE_SIZE;
+    render();
+  });
   document.getElementById('history-more').addEventListener('click', (ev) => {
     if (ev.target.closest('[data-action="load-more"]')) {
       visibleCount += PAGE_SIZE;
@@ -77,37 +81,48 @@ function buildEntries(history) {
 
 function render() {
   const query = document.getElementById('search-input').value.trim().toLowerCase();
-  const matches = query
-    ? allEntries.filter((e) => searchText(e).includes(query))
-    : allEntries;
+  const range = document.getElementById('range-select').value; // 'all' | '5' | '30' | '90'
+
+  let matches = range === 'all'
+    ? allEntries
+    : allEntries.filter((e) => daysFromToday(e.date) < Number(range));
+  if (query) matches = matches.filter((e) => searchText(e).includes(query));
 
   const grid = document.getElementById('history-grid');
   const moreHost = document.getElementById('history-more');
   const countEl = document.getElementById('history-count');
 
   if (!matches.length) {
-    renderEmptyState(grid, {
-      title: `Geen resultaten voor "${escapeHtml(document.getElementById('search-input').value.trim())}"`,
-      message: 'Probeer een andere datum, of wis de zoekopdracht.',
-    });
+    renderEmptyState(grid, query
+      ? {
+        title: `Geen resultaten voor "${escapeHtml(document.getElementById('search-input').value.trim())}"`,
+        message: 'Probeer een andere datum, of wis de zoekopdracht.',
+      }
+      : {
+        title: 'Geen data in deze periode',
+        message: 'Kies een andere periode.',
+      });
     moreHost.innerHTML = '';
     countEl.textContent = '';
     return;
   }
 
-  const shown = query ? matches : matches.slice(0, visibleCount);
+  const paginate = !query && range === 'all';
+  const shown = paginate ? matches.slice(0, visibleCount) : matches;
   grid.innerHTML = shown.map(entryCard).join('');
 
-  if (!query && matches.length > shown.length) {
+  if (paginate && matches.length > shown.length) {
     moreHost.innerHTML =
       '<button class="btn btn-outline" data-action="load-more">Meer laden</button>';
   } else {
     moreHost.innerHTML = '';
   }
 
-  countEl.textContent = query
-    ? `${matches.length} resulta${matches.length === 1 ? 'at' : 'ten'}`
-    : `${shown.length} van ${matches.length} dagen`;
+  countEl.textContent = paginate
+    ? `${shown.length} van ${matches.length} dagen`
+    : query
+      ? `${matches.length} resulta${matches.length === 1 ? 'at' : 'ten'}`
+      : `${matches.length} dag${matches.length === 1 ? '' : 'en'}`;
 }
 
 function entryCard(entry) {
