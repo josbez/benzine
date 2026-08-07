@@ -203,6 +203,51 @@ def _add_market_features(panel: pd.DataFrame, mk: pd.DataFrame) -> None:
     vol = rbob.diff().rolling(20).std()
     panel["mkt_vol_20d"] = vol.reindex(idx).to_numpy()
 
+    _add_crude_features(panel, mk)
+
+
+def _add_crude_features(panel: pd.DataFrame, mk: pd.DataFrame) -> None:
+    """Crude, and the refining margin between crude and gasoline.
+
+    What is being forecast is a Dutch pump price, and crude never reaches
+    a Dutch pump directly -- it reaches it through the refined product.
+    So Brent enters here as a *driver* of the gasoline price, not as a
+    second cost anchor: the cost base in `_add_cost_gap` stays the refined
+    series, because that is what a Dutch retailer actually buys.
+
+    Two things crude adds that the gasoline series alone does not:
+
+      * A supply shock -- a strait threatened, an OPEC decision -- lands in
+        crude first and most cleanly. The gasoline contract carries it too,
+        mixed with refinery outages, blend-season switches and US driving
+        demand that have nothing to do with a Rotterdam barge.
+      * The crack spread says whether a gasoline move will hold. A move
+        that is only in the crack is a refining-margin story and tends to
+        unwind within weeks; a crude-driven move does not. Same size at the
+        wholesale end, different pass-through at the pump.
+
+    Deliberately no up/down split here, unlike the pump-side features:
+    "rockets and feathers" is *retail* behaviour, and the crude-to-product
+    leg is fast and close to symmetric.
+    """
+    brent = mk["brent_eur_l"]
+    rbob = mk["rbob_eur_l"]
+    idx = panel["date"]
+
+    for w in _MARKET_WINDOWS:
+        panel[f"crude_chg_{w}d"] = (brent - brent.shift(w)).reindex(idx).to_numpy()
+
+    brent_at_anchor = brent.reindex(panel["anchor_date"]).to_numpy()
+    panel["crude_since_anchor"] = brent.reindex(idx).to_numpy() - brent_at_anchor
+
+    # The refining margin itself: what a litre of finished gasoline costs
+    # over the crude inside it.
+    crack = (rbob - brent).reindex(idx)
+    panel["crack"] = crack.to_numpy()
+    panel["crack_dev"] = (
+        crack - crack.rolling(90, min_periods=20).mean()
+    ).to_numpy()
+
 
 def _add_pump_history(panel: pd.DataFrame, pump: pd.DataFrame) -> None:
     """Recent observed pump momentum, measured back from the anchor date."""

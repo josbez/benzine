@@ -259,15 +259,24 @@ class TestMarketProviders:
         assert len(calls) == 2
         assert len(self.slept) == 1
 
-    def test_backoff_grows_between_attempts(self, monkeypatch):
+    def test_backoff_doubles_between_attempts(self, monkeypatch):
+        """Each wait sits in its own attempt's jittered band.
+
+        Not `slept[1] > slept[0]`: with ±50% jitter the bands overlap, so
+        that assertion fails a few percent of the time -- which in a job
+        that runs unattended at 03:00 is the worst kind of test.
+        """
         monkeypatch.setattr(
             market, "_yahoo",
             lambda s, w=None: (_ for _ in ()).throw(RuntimeError("down")),
         )
         monkeypatch.setattr(market, "_stooq", lambda s, w=None: self._series())
         market._first_working("rbob", "RB=F", "rb.f")
+
         assert len(self.slept) == market._ATTEMPTS - 1
-        assert self.slept[1] > self.slept[0]
+        for i, waited in enumerate(self.slept):
+            base = market._BACKOFF * 2**i
+            assert base * (1 - market._JITTER) <= waited <= base * (1 + market._JITTER)
 
     def test_an_empty_answer_moves_on_instead_of_retrying(self, monkeypatch):
         """A blocked symbol answers empty every time; retrying only delays
@@ -651,6 +660,95 @@ class TestPanel:
         assert not [c for c in cols if c.startswith(("y_h", "actual_h"))]
         assert "duty_step_h3" in cols
         assert "duty_step_h5" not in cols
+
+    def test_no_feature_changes_when_later_market_data_arrives(self):
+        """A blanket no-lookahead net over every market feature at once.
+
+        The individual features are each written to look backwards, but
+        that is a property of thirty-odd lines that keep being added to.
+        This checks the invariant itself: rebuild the panel with a month
+        of extra wholesale data and the rows that were already there must
+        come out bit-for-bit identical.
+        """
+        pump, market = synthetic.generate(start="2019-01-01", end="2021-12-31")
+        cutoff = pd.Timestamp("2021-06-30")
+
+        short = build_panel(pump[pump["date"] <= cutoff],
+                            market[market["date"] <= cutoff])
+        full = build_panel(pump, market)
+
+        overlap = full[full["date"].isin(short["date"])].reset_index(drop=True)
+        short = short.reset_index(drop=True)
+        # Targets legitimately differ -- they are the future, which is the
+        # whole point. Everything a model reads must not.
+        from benzine.features import feature_columns
+
+        for col in feature_columns(short, horizon=3):
+            pd.testing.assert_series_equal(
+                short[col], overlap[col], check_names=False,
+                obj=f"feature {col!r} changed when future data was added",
+            )
+
+
+class TestCrudeFeatures:
+    """Brent is downloaded, and until August 2026 it was never used. A
+    Dutch pump price is set off the refined product, but crude is what
+    moves that product -- and a crude-driven move behaves differently from
+    a refining-margin one."""
+
+    @pytest.fixture(scope="class")
+    def panel(self):
+        pump, market = synthetic.generate(start="2019-01-01", end="2023-12-31")
+        return build_panel(pump, market)
+
+    def test_crack_is_gasoline_minus_crude(self, panel):
+        pump, market = synthetic.generate(start="2019-01-01", end="2023-12-31")
+        mk = market.set_index("date")
+        row = panel.iloc[400]
+        expected = mk.loc[row["date"], "rbob_eur_l"] - mk.loc[row["date"], "brent_eur_l"]
+        assert row["crack"] == pytest.approx(expected)
+
+    def test_crude_features_are_present_for_every_window(self, panel):
+        from benzine.features import _MARKET_WINDOWS, feature_columns
+
+        cols = feature_columns(panel, horizon=1)
+        for w in _MARKET_WINDOWS:
+            assert f"crude_chg_{w}d" in cols
+        assert "crude_since_anchor" in cols
+        assert "crack_dev" in cols
+
+    def test_crude_carries_information_gasoline_does_not(self, panel):
+        """Guards the generator as much as the features.
+
+        Before this change the synthetic Brent was an exact affine
+        function of the gasoline series, so every crude feature was a
+        rescaled copy of an existing one and no test here could have
+        failed. If that regresses, this catches it.
+        """
+        assert abs(panel["crude_chg_7d"].corr(panel["mkt_chg_7d"])) < 0.99
+        assert panel["crack"].std() > 0.001
+
+    def test_a_crude_spike_moves_the_crude_features_only(self):
+        """The distinction the features exist to make: a barrel that got
+        more expensive, versus a refining margin that widened."""
+        pump, market = synthetic.generate(start="2020-01-01", end="2020-12-31")
+        spiked = market.copy()
+        day = spiked["date"] >= pd.Timestamp("2020-06-01")
+        # Crude jumps and gasoline follows it one-for-one: the crack is
+        # unchanged, so this is a pure crude event.
+        spiked.loc[day, "brent_eur_l"] += 0.10
+        spiked.loc[day, "rbob_eur_l"] += 0.10
+
+        base = build_panel(pump, market)
+        after = build_panel(pump, spiked)
+        # The day the jump lands: the day before is still unspiked, so the
+        # one-day change carries it. By the next day it is in both terms.
+        row = (base["date"] == pd.Timestamp("2020-06-01")).values
+
+        assert after.loc[row, "crude_chg_1d"].iloc[0] > 0.09
+        assert after.loc[row, "crack"].iloc[0] == pytest.approx(
+            base.loc[row, "crack"].iloc[0]
+        )
 
 
 class TestAdvisoryAnchor:

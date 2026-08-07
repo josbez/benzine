@@ -55,12 +55,25 @@ no server. Two GitHub Actions workflows cover it, free:
 
 | Workflow | When | What |
 |---|---|---|
-| `daily.yml` | 05:00 UTC daily | scrape the advisory price, rebuild the forecast, publish to GitHub Pages |
+| `daily.yml` | 03:00, 12:00, 17:00 Dutch time | scrape the advisory price, rebuild the forecast, publish to GitHub Pages |
 | `backtest.yml` | Mondays | re-run the walk-forward evaluation, commit the scores |
 
-They are split because the daily run takes well under a minute while the
-backtest takes several — and its scores barely move day to day. The daily
-job reads the cached scores from `data/backtest_metrics.json`.
+They are split because the forecast run takes well under a minute while
+the backtest takes several — and its scores barely move day to day. The
+forecast job reads the cached scores from `data/backtest_metrics.json`.
+
+The three daily runs are for the wholesale side: RBOB and Brent trade
+through the afternoon, so the midday and late runs see the day's move
+instead of yesterday's close. Advisory prices are published the evening
+before and CBS releases on Thursday mornings, so the first run of the day
+is the one that matters for those. Cron is UTC and GitHub does not do
+daylight saving, so the schedule is set for CEST and slips an hour in
+local terms over the winter, which changes nothing that matters.
+
+The source caches expire in hours (four for the market feeds, eight for
+the weekly CBS table) rather than half a day. That is not a detail: with
+a cache longer than the gap between runs, the later runs would republish
+the earlier one's numbers and the extra runs would buy nothing.
 
 The site is published by pushing `web/` to a **`gh-pages`** branch, not
 through the Pages deployment API. Set **Settings → Pages → Source: Deploy
@@ -190,6 +203,22 @@ can show a widening band instead of implying false precision.
 RBOB stands in for the real EBOB Rotterdam assessment, which is a paid
 Argus/Platts product. Swapping in a licensed EBOB feed means changing
 `sources/market.py` and nothing else.
+
+**Crude enters as a driver, not as a second cost anchor.** A Dutch
+retailer buys finished gasoline, so the cost base the margin is measured
+against stays the refined series. Brent earns its place for two other
+reasons. A supply shock — a strait threatened, an OPEC decision — lands in
+crude first and most cleanly, while the gasoline contract carries it mixed
+with refinery outages, blend-season switches and US driving demand that
+have nothing to do with a Rotterdam barge. And the **crack spread**
+(gasoline minus the crude inside it) says whether a wholesale move will
+hold: a move that is only in the crack is a refining-margin story that
+tends to unwind within weeks, while a crude-driven move does not. Same
+size at the wholesale end, different pass-through at the pump.
+
+Unlike the pump-side features these carry no up/down split. "Rockets and
+feathers" is retail behaviour; the crude-to-product leg is fast and close
+to symmetric.
 
 Each market series is tried against Yahoo Finance first and Stooq second,
 and each provider is retried three times with exponential backoff before
