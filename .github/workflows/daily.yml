@@ -56,7 +56,7 @@ jobs:
       # when the job fails -- which would mean re-downloading twenty years
       # of history every morning, forever.
       - name: Restore source caches
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: data/raw/*.parquet
           key: source-caches-${{ github.run_id }}
@@ -165,7 +165,7 @@ jobs:
 
       - name: Save source caches
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: data/raw/*.parquet
           key: source-caches-${{ github.run_id }}

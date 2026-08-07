@@ -35,7 +35,7 @@ jobs:
       # 7 August, on a runner that had reached the same host two hours
       # earlier.
       - name: Restore source caches
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: data/raw/*.parquet
           key: source-caches-${{ github.run_id }}
