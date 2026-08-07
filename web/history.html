@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Geschiedenis &middot; Benzineprijs Forecaster</title>
+<meta name="description" content="Eerder gemeten Euro 95 pompprijzen, per dag.">
+<meta name="theme-color" content="#faf9f6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#202221" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>⛽</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Space+Mono:wght@700&family=Work+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="wordmark" href="index.html">Forecaster</a>
+      <nav class="topnav" aria-label="Hoofdnavigatie">
+        <a class="topnav-link" href="index.html">Voorspelling</a>
+        <a class="topnav-link is-active" href="history.html">Geschiedenis</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="content">
+
+    <div class="history-head">
+      <h1 class="h1">Geschiedenis</h1>
+      <div class="search-field">
+        <span id="search-icon"></span>
+        <input type="text" id="search-input" placeholder="Zoek op datum&hellip;" aria-label="Zoek op datum">
+      </div>
+    </div>
+
+    <div id="banner-slot"></div>
+
+    <div id="history-grid" class="history-grid"></div>
+    <p class="history-count" id="history-count"></p>
+
+    <div class="history-more" id="history-more"></div>
+
+  </main>
+
+  <nav class="bottomnav" aria-label="Hoofdnavigatie">
+    <a class="bottomnav-link" href="index.html">
+      <span id="nav-icon-forecast"></span>
+      <span>Voorspelling</span>
+    </a>
+    <a class="bottomnav-link is-active" href="history.html">
+      <span id="nav-icon-history"></span>
+      <span>Geschiedenis</span>
+    </a>
+  </nav>
+
+</div>
+<script src="shared.js"></script>
+<script src="history.js"></script>
+</body>
+</html>

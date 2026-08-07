@@ -2,19 +2,10 @@
  *
  * The chart is deliberately hand-rolled SVG: one series, a fan, and a
  * crosshair is not worth a charting dependency, and inlining it keeps the
- * page self-contained.
+ * page self-contained. Shared formatting helpers live in shared.js.
  */
 
 const CHART_DAYS = 30; // of history to show alongside the 5-day forecast
-
-const fmtPrice = (v) => '€ ' + v.toFixed(3).replace('.', ',');
-const fmtCents = (v) => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(1) + ' ct';
-const DOW = ['zo', 'ma', 'di', 'wo', 'do', 'vr', 'za'];
-
-const parseDate = (s) => {
-  const [y, m, d] = s.split('-').map(Number);
-  return new Date(Date.UTC(y, m - 1, d));
-};
 
 init();
 
@@ -22,17 +13,22 @@ async function init() {
   let data;
   try {
     const res = await fetch('forecast.json', { cache: 'no-store' });
-    if (!res.ok) throw new Error(res.status);
+    if (!res.ok) throw new Error(String(res.status));
     data = await res.json();
   } catch (err) {
-    document.getElementById('hero').textContent = 'geen data';
-    document.getElementById('anchor-meta').textContent =
-      'forecast.json ontbreekt — draai eerst: python -m benzine all';
+    showLoadError();
     return;
   }
 
+  const bannerSlot = document.getElementById('banner-slot');
   if (data.data_source === 'synthetic') {
-    document.getElementById('synthetic-banner').hidden = false;
+    renderBanner(bannerSlot, {
+      kind: 'info',
+      title: 'Demodata.',
+      message: 'Deze voorspelling draait op een synthetische reeks, niet op ' +
+        'echte marktdata. De cijfers tonen aan dat de pipeline werkt &mdash; ' +
+        'ze zeggen niets over de benzineprijs.',
+    });
   }
 
   renderHero(data);
@@ -47,12 +43,24 @@ async function init() {
   window.addEventListener('resize', () => chart.draw());
 }
 
+function showLoadError() {
+  document.getElementById('app-grid').hidden = true;
+  document.getElementById('footer').textContent = '';
+  renderBanner(document.getElementById('banner-slot'), {
+    kind: 'error',
+    title: 'Kan de voorspelling niet laden.',
+    message: 'forecast.json ontbreekt of kon niet worden opgehaald. Draai ' +
+      'eerst <code>python -m benzine all</code> en herlaad de pagina.',
+    actionLabel: 'Opnieuw proberen',
+    onAction: () => window.location.reload(),
+  });
+}
+
 /* -- panels ----------------------------------------------------------- */
 
 function renderHero(data) {
   const a = data.anchor;
-  document.getElementById('hero').innerHTML =
-    fmtPrice(a.price) + '<span class="unit"> /l</span>';
+  document.getElementById('hero').textContent = a.price.toFixed(3).replace('.', ',');
   document.getElementById('anchor-label').textContent =
     a.source === 'adviesprijs' ? 'Landelijke adviesprijs' : 'Laatst gemeten prijs';
 
@@ -63,6 +71,17 @@ function renderHero(data) {
     `${a.source} · ${when} (${a.date})`;
   document.getElementById('fuel-line').textContent =
     `${data.fuel} · landelijk gemiddelde`;
+
+  const chipEl = document.getElementById('trend-chip');
+  if (data.forecast && data.forecast.length) {
+    const last = data.forecast[data.forecast.length - 1];
+    const move = (last.q50 - a.price) * 100;
+    const { className, label } = trendChip(move, { verb: true });
+    chipEl.className = 'chip ' + className;
+    chipEl.textContent = label;
+  } else {
+    chipEl.hidden = true;
+  }
 }
 
 function renderDays(data) {
@@ -70,21 +89,31 @@ function renderDays(data) {
   const base = data.anchor.price;
   host.innerHTML = '';
 
-  for (const row of data.forecast) {
+  if (!data.forecast || !data.forecast.length) {
+    renderEmptyState(host, {
+      title: 'Geen voorspelling beschikbaar',
+      message: 'Er zijn geen dagramingen om te tonen.',
+    });
+    document.getElementById('days-note').textContent = '';
+    return;
+  }
+
+  data.forecast.forEach((row, i) => {
     const d = parseDate(row.date);
     const delta = (row.q50 - base) * 100;
     const dir = delta > 0.25 ? 'up' : delta < -0.25 ? 'down' : '';
     const arrow = dir === 'up' ? '↑' : dir === 'down' ? '↓' : '→';
+    const isLast = i === data.forecast.length - 1;
 
     const el = document.createElement('div');
-    el.className = 'day';
+    el.className = 'day' + (isLast ? ' is-highlight' : '');
     el.innerHTML = `
       <div class="dow">${DOW[d.getUTCDay()]} ${d.getUTCDate()}</div>
       <div class="price">${row.q50.toFixed(3).replace('.', ',')}</div>
-      <div class="delta ${dir}">${arrow} ${fmtCents(delta)}</div>
+      <div class="delta">${arrow} ${fmtCents(delta)}</div>
       <div class="spread">${(row.q10).toFixed(2).replace('.', ',')}–${(row.q90).toFixed(2).replace('.', ',')}</div>`;
     host.appendChild(el);
-  }
+  });
 
   document.getElementById('days-note').textContent =
     'Middelste waarde is de meest waarschijnlijke prijs; daaronder de band waar ' +
@@ -94,6 +123,12 @@ function renderDays(data) {
 function renderDrivers(data) {
   const host = document.getElementById('drivers');
   const a = data.anchor;
+
+  if (!data.forecast || !data.forecast.length) {
+    host.innerHTML = '';
+    return;
+  }
+
   const last = data.forecast[data.forecast.length - 1];
   const move = (last.q50 - a.price) * 100;
 
@@ -121,10 +156,10 @@ function renderDrivers(data) {
       `${fmtCents(move)} ten opzichte van nu.`;
 
   host.innerHTML = items.map(([t, b]) => `
-    <div class="driver">
+    <li class="driver">
       <span class="dot"></span>
       <div class="driver-body"><strong>${t}</strong><span>${b}</span></div>
-    </div>`).join('') +
+    </li>`).join('') +
     `<p class="note">${summary}</p>`;
 }
 
@@ -143,7 +178,7 @@ function renderSkill(data) {
     <tr>
       <td>${r.horizon} dag${r.horizon === 1 ? '' : 'en'}</td>
       <td>${r.mae_cents.toFixed(2)} ct</td>
-      <td>${r.mae_naive_cents.toFixed(2)} ct</td>
+      <td class="naive">${r.mae_naive_cents.toFixed(2)} ct</td>
       <td>${(r.skill_vs_naive * 100).toFixed(0)}%</td>
     </tr>`).join('');
 
@@ -166,6 +201,11 @@ class FanChart {
 
   draw() {
     const { svg, data } = this;
+    if (!data.history || !data.history.length || !data.forecast || !data.forecast.length) {
+      svg.innerHTML = '';
+      return;
+    }
+
     const width = svg.clientWidth || 360;
     const height = Math.max(200, Math.min(260, width * 0.62));
     const pad = { t: 12, r: 12, b: 22, l: 40 };
@@ -201,15 +241,16 @@ class FanChart {
     this.points = history.map((d) => ({ ...d, kind: 'past' }))
       .concat(fan.slice(1).map((d) => ({ ...d, v: d.q50, kind: 'future' })));
 
-    // gridlines + y ticks
+    // gridlines + y ticks -- drawn inside the viewBox, with room reserved
+    // in `pad.l` for the labels, so they never spill past the card edge.
     for (const tick of ticks) {
       this.add('line', {
         x1: pad.l, x2: width - pad.r, y1: Y(tick), y2: Y(tick),
-        stroke: 'var(--grid)', 'stroke-width': 1,
+        stroke: 'var(--outline-variant)', 'stroke-width': 1,
       });
       this.add('text', {
         x: pad.l - 7, y: Y(tick) + 3.5, 'text-anchor': 'end',
-        fill: 'var(--text-muted)', 'font-size': 10,
+        fill: 'var(--on-surface-variant)', 'font-size': 10,
         'font-variant-numeric': 'tabular-nums',
       }, tick.toFixed(2).replace('.', ','));
     }
@@ -217,30 +258,30 @@ class FanChart {
     // uncertainty bands, widest first
     this.add('path', {
       d: band(fan, 'q10', 'q90', X, Y),
-      fill: 'var(--series-1)', 'fill-opacity': 0.10,
+      fill: 'var(--primary)', 'fill-opacity': 0.10,
     });
     this.add('path', {
       d: band(fan, 'q25', 'q75', X, Y),
-      fill: 'var(--series-1)', 'fill-opacity': 0.16,
+      fill: 'var(--primary)', 'fill-opacity': 0.16,
     });
 
     // "now" divider
     this.add('line', {
       x1: X(anchorT), x2: X(anchorT), y1: pad.t, y2: height - pad.b,
-      stroke: 'var(--axis)', 'stroke-width': 1,
+      stroke: 'var(--outline)', 'stroke-width': 1,
     });
 
     // measured history
     this.add('path', {
       d: line(history.map((d) => [X(d.t), Y(d.v)])),
-      fill: 'none', stroke: 'var(--series-1)', 'stroke-width': 2,
+      fill: 'none', stroke: 'var(--primary)', 'stroke-width': 2,
       'stroke-linejoin': 'round', 'stroke-linecap': 'round',
     });
 
     // forecast median
     this.add('path', {
       d: line(fan.map((d) => [X(d.t), Y(d.q50)])),
-      fill: 'none', stroke: 'var(--series-1)', 'stroke-width': 2,
+      fill: 'none', stroke: 'var(--primary)', 'stroke-width': 2,
       'stroke-dasharray': '4 3', 'stroke-linecap': 'round',
     });
 
@@ -248,12 +289,12 @@ class FanChart {
     const last = fan[fan.length - 1];
     this.add('circle', {
       cx: X(last.t), cy: Y(last.q50), r: 4.5,
-      fill: 'var(--series-1)', stroke: 'var(--surface-1)', 'stroke-width': 2,
+      fill: 'var(--primary)', stroke: 'var(--surface-container-lowest)', 'stroke-width': 2,
     });
 
     this.xAxis(history, fan, X, height, pad);
     this.crosshair = this.add('line', {
-      y1: pad.t, y2: height - pad.b, stroke: 'var(--axis)',
+      y1: pad.t, y2: height - pad.b, stroke: 'var(--outline)',
       'stroke-width': 1, opacity: 0,
     });
   }
@@ -269,7 +310,7 @@ class FanChart {
       const d = new Date(m.t);
       this.add('text', {
         x: X(m.t), y: height - pad.b + 14, 'text-anchor': 'middle',
-        fill: 'var(--text-muted)', 'font-size': 10,
+        fill: 'var(--on-surface-variant)', 'font-size': 10,
       }, `${d.getUTCDate()}/${d.getUTCMonth() + 1}`);
     }
   }
