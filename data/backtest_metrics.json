@@ -113,55 +113,55 @@
     "model":"gbm",
     "horizon":1,
     "n":1827,
-    "mae_cents":2.0414,
-    "rmse_cents":3.3702,
+    "mae_cents":2.0676,
+    "rmse_cents":3.4013,
     "mae_naive_cents":2.4114,
-    "skill_vs_naive":0.1534,
-    "coverage_80":0.7723,
+    "skill_vs_naive":0.1426,
+    "coverage_80":0.7969,
     "pinball":0.008
   },
   {
     "model":"gbm",
     "horizon":2,
     "n":1827,
-    "mae_cents":2.2744,
-    "rmse_cents":3.6746,
+    "mae_cents":2.272,
+    "rmse_cents":3.7016,
     "mae_naive_cents":2.6551,
-    "skill_vs_naive":0.1434,
-    "coverage_80":0.7657,
-    "pinball":0.0088
+    "skill_vs_naive":0.1443,
+    "coverage_80":0.7674,
+    "pinball":0.0089
   },
   {
     "model":"gbm",
     "horizon":3,
     "n":1827,
-    "mae_cents":2.5125,
-    "rmse_cents":3.9714,
+    "mae_cents":2.5219,
+    "rmse_cents":4.0,
     "mae_naive_cents":2.8876,
-    "skill_vs_naive":0.1299,
-    "coverage_80":0.7794,
-    "pinball":0.0097
+    "skill_vs_naive":0.1266,
+    "coverage_80":0.7778,
+    "pinball":0.0098
   },
   {
     "model":"gbm",
     "horizon":4,
     "n":1827,
-    "mae_cents":2.7423,
-    "rmse_cents":4.2767,
+    "mae_cents":2.7439,
+    "rmse_cents":4.3169,
     "mae_naive_cents":3.119,
-    "skill_vs_naive":0.1208,
-    "coverage_80":0.7734,
+    "skill_vs_naive":0.1202,
+    "coverage_80":0.786,
     "pinball":0.0106
   },
   {
     "model":"gbm",
     "horizon":5,
     "n":1827,
-    "mae_cents":2.9845,
-    "rmse_cents":4.6067,
+    "mae_cents":2.9312,
+    "rmse_cents":4.5834,
     "mae_naive_cents":3.3536,
-    "skill_vs_naive":0.1101,
-    "coverage_80":0.7729,
-    "pinball":0.0115
+    "skill_vs_naive":0.1259,
+    "coverage_80":0.7767,
+    "pinball":0.0114
   }
 ]
