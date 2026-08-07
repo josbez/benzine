@@ -1,4 +1,4 @@
-.PHONY: install test build backtest forecast all demo serve clean
+.PHONY: install test build backtest forecast all demo snapshot probe serve clean
 
 PY ?= python3
 export PYTHONPATH := src
@@ -31,6 +31,13 @@ demo:
 # history that the same-day anchor depends on.
 snapshot:
 	$(PY) -c "from benzine.sources import gla; print(gla.record_today())"
+
+# When `snapshot` fails: report where the advisory price actually lives.
+# Looks inside the <script> tags that the text parser strips, then follows
+# the API-ish URLs the page mentions. The daily workflow runs this by
+# itself and attaches the output to the issue it opens.
+probe:
+	$(PY) -c "from benzine.sources import gla; print(gla.probe(follow=True))"
 
 serve:
 	@echo "http://localhost:8000"

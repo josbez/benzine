@@ -71,57 +71,50 @@ The branch is force-pushed as a single commit each time. It holds
 generated output only, so its history is worth nothing and letting it grow
 would cost clone time forever.
 
-### Pages has never actually served anything — what is known, 6 Aug 2026
-
-Facts, in the order they were established:
-
-- The deployment-API route (`configure-pages` / `upload-pages-artifact` /
-  `deploy-pages`) repeatedly created a deployment and then sat on
-  `deployment_in_progress` until it timed out.
-- Switching to a branch push did **not** sidestep that. Pushing to
-  `gh-pages` triggers GitHub's own *pages build and deployment* workflow,
-  which runs `deploy-pages` internally and stalls in the same place (run
-  `31110887125`). So the branch route buys less than the earlier version
-  of this README claimed.
-- **Settings → Pages** is configured correctly: *Deploy from a branch*,
-  `gh-pages` / `(root)`. This was verified, not assumed. A source mismatch
-  is therefore not the explanation.
-- GitHub had a live Actions incident that evening whose status updates
-  named Pages explicitly ("GitHub Pages may experience failures or
-  delays"), with jobs queued and never picked up. Whether it also covers
-  the earlier stalls depends on when the incident began, which was not
-  established.
-
-What that adds up to: the cause is **not identified**. It is somewhere in
-Pages' own deployment machinery, and nothing in this repository has been
-shown to influence it. Resist the temptation to write a convincing story
-here — the previous version of this section argued at length that a branch
-push could not be blocked by a deployment stall, and the logs then showed
-exactly that happening.
-
-The order to work through, cheapest first:
-
-1. Re-run the daily workflow once GitHub reports the incident resolved.
-   That is the one test that has not been run under normal conditions.
-2. Cancel anything stuck in the `github-pages` environment
-   (`gh api repos/josbez/benzine/deployments` → `POST .../statuses` with
-   `state=inactive`), then re-run.
-3. Check `github-pages` for environment protection rules waiting on an
-   approval nobody is giving.
-4. If it still will not deploy, publish `web/` to Netlify or Cloudflare
-   Pages instead — three static files and one JSON, so the hosting choice
-   carries no weight.
-
-The daily run ends with a healthcheck that polls the live `forecast.json`
+Every run ends with a healthcheck that polls the live `forecast.json`
 until it carries the `generated_at` of the build that just ran, and fails
-otherwise. Until Pages serves, the workflow therefore goes red every day —
-deliberately, because the alternative is a green run publishing to a site
-nobody is serving. The advisory price is committed long before that step,
-so a red run costs no data.
+the run otherwise. A push to `gh-pages` reports success the moment the
+branch moves, which is not the same thing as the site being updated — and
+a green run that published nothing is worse than a red one, because
+nobody goes looking.
 
-The branch push is kept regardless: it is less machinery than the artifact
-route (no artifact, no environment, no deployment to poll), which is a
-reason to prefer it but was never a reason to expect it to fix a stall.
+<details>
+<summary>The two days Pages did not deploy at all (6–7 Aug 2026)</summary>
+
+Worth keeping, because the conclusion that felt obvious was wrong twice.
+
+Every Pages deployment stalled on `deployment_in_progress` until it timed
+out — first through the deployment API (`configure-pages` /
+`upload-pages-artifact` / `deploy-pages`), and then, after switching to a
+branch push, through GitHub's own *pages build and deployment* workflow,
+which runs `deploy-pages` internally and stalled identically (run
+`31110887125`). The site had never served anything.
+
+Two theories were written up confidently and both were wrong. First, that
+a branch push could not be blocked by a stall in the deployment API — the
+logs showed exactly that happening. Then, that this had to be a Pages
+*configuration* problem: **Settings → Pages** turned out to be correct all
+along (*Deploy from a branch*, `gh-pages` / `(root)`), and billing was
+fine too.
+
+What it actually was: a GitHub-wide Actions incident whose status updates
+named Pages explicitly. Nothing in this repository was ever involved. The
+next scheduled run after the incident cleared (`31152665906`) published
+and passed the healthcheck in 70 seconds, with no change on our side.
+
+The lesson for the next infrastructure failure here: a convincing
+explanation is not evidence. Check the platform status page before
+writing a diagnosis, and treat a verified run as the only thing that
+closes the question.
+
+If Pages stalls again: check status.github.com first, then for a
+deployment stuck in the `github-pages` environment, then for environment
+protection rules waiting on an approval nobody is giving. If it persists
+with the platform healthy, publish `web/` to Netlify or Cloudflare Pages
+instead — three static files and one JSON, so the hosting choice carries
+no weight.
+
+</details>
 
 Two things worth knowing:
 
@@ -251,9 +244,17 @@ tests/           timing and leakage guards
   output `data_source: synthetic`, which the web app surfaces as a warning
   banner. Backtest numbers on synthetic data verify the machinery; they say
   nothing about real-world accuracy.
-- **The GLA scraper is untested against the live page.** It parses the
-  page's text (tags stripped) and raises with an excerpt rather than
-  guessing, so a failure in CI shows what the page actually contained.
+- **The GLA scraper does not currently work, so the advisory-price history
+  is still empty.** As of 7 August 2026 the live page carries no price and
+  no fuel label anywhere in its text: the figures arrive after render. The
+  daily run therefore opens an issue instead of failing, and attaches
+  `make probe`, which looks inside the `<script>` tags the text parser
+  strips and follows the API-ish URLs the page mentions. Server-rendered
+  frameworks ship their data as JSON in the HTML, so "rendered
+  client-side" and "absent from the HTML" are not the same thing, and the
+  scraper's own verdict cannot tell them apart. Until this is fixed the
+  anchor stays on CBS and every passing day is a day of history that
+  cannot be recovered.
 - **The advisory price only becomes the anchor after ~10 overlapping days.**
   It is a list price from the five majors while CBS is volume-weighted
   across all stations including discounters, so the two sit cents apart.

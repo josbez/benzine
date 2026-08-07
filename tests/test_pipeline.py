@@ -539,6 +539,65 @@ class TestAdvisoryScraper:
             gla.scrape("<html><body><h1>Koekjes accepteren</h1></body></html>")
 
 
+class TestPriceProbe:
+    """On 7 August 2026 the live page had no price and no fuel label in its
+    text at all. `diagnose()` says *that*; these pin down the tooling that
+    says *where the price went instead*."""
+
+    NEXT_PAGE = """
+    <html><head><title>Adviesprijs</title></head><body>
+      <div id="root"></div>
+      <script id="__NEXT_DATA__" type="application/json">
+        {"props":{"pageProps":{"fuels":[
+          {"name":"Euro 95 (E10)","adviesprijs":2.109},
+          {"name":"Diesel","adviesprijs":1.879}]}}}
+      </script>
+      <script>window.__CONFIG__ = {"apiBase":"/api/v2/brandstofprijzen"};</script>
+    </body></html>
+    """
+
+    def test_finds_a_price_the_text_parser_cannot_see(self):
+        """The decisive case: `to_text()` strips <script>, so a Next.js
+        payload is invisible to both find_price and diagnose -- yet the
+        price is sitting right there in the HTML."""
+        assert gla.find_price(gla.to_text(self.NEXT_PAGE)) is None
+        report = gla.probe(self.NEXT_PAGE)
+        assert "2.109" in report
+        assert "the price is in the HTML after all" in report
+
+    def test_names_the_blob_that_holds_it(self):
+        """Without the script's id, the report says a price exists
+        somewhere and leaves you to find it."""
+        report = gla.probe(self.NEXT_PAGE)
+        assert "__NEXT_DATA__" in report
+        assert "adviesprijs" in report
+
+    def test_parses_an_assignment_not_just_a_bare_payload(self):
+        blobs = dict(gla.embedded_json(self.NEXT_PAGE))
+        assert "<inline>" in blobs
+        assert blobs["<inline>"]["apiBase"] == "/api/v2/brandstofprijzen"
+
+    def test_lists_candidate_endpoints(self):
+        assert "/api/v2/brandstofprijzen" in gla.find_endpoints(self.NEXT_PAGE)
+
+    def test_ignores_assets(self):
+        """Every page links dozens of scripts and none of them are data."""
+        html = '<script src="/_next/static/chunks/api-4f2.js"></script>'
+        assert gla.find_endpoints(html) == []
+
+    def test_rejects_numbers_that_are_not_prices(self):
+        """A page is full of small numbers -- ids, counts, ratings."""
+        assert not gla._price_like(0.5)
+        assert not gla._price_like(2026)
+        assert not gla._price_like(True)
+        assert gla._price_like(2.109)
+        assert gla._price_like("2,109")
+
+    def test_says_so_when_there_is_no_json_at_all(self):
+        report = gla.probe("<html><body><p>Niets hier</p></body></html>")
+        assert "no parseable JSON" in report
+
+
 def pump_fixture() -> pd.DataFrame:
     pump, _ = synthetic.generate(start="2019-01-01", end="2024-12-31")
     return pump
