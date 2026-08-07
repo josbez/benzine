@@ -18,24 +18,22 @@ history, a single network hiccup used to be permanently expensive.
 from __future__ import annotations
 
 import io
-import random
-import time
 
 import pandas as pd
 import requests
 
 from ..config import RAW
 from . import cache as cache_policy
+from . import retry
 
 _TIMEOUT = 60
 _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; benzine-forecaster/0.1)"}
 
-# Per provider, not per series: a provider that answers a block page will
-# answer it again, so the retries are there for transient faults (timeouts,
-# 5xx, a truncated response) and hand over to the next provider quickly.
-_ATTEMPTS = 3
-_BACKOFF = 2.0  # seconds before the second attempt, doubled after that
-_JITTER = 0.5   # fraction of the delay drawn at random, to avoid lockstep
+# Retries are per provider, not per series: a provider that answers a
+# block page will answer it again, so they are there for transient faults
+# (timeouts, 5xx, a truncated response) and hand over to the next provider
+# quickly. The schedule itself is shared with the other sources.
+_ATTEMPTS = retry.ATTEMPTS
 
 # Yahoo accepts a range; asking for twenty years of history every morning is
 # both wasteful and a good way to get rate-limited. With a cache in hand we
@@ -141,23 +139,12 @@ def _first_working(
                 failures.append(f"{provider}({symbol}) try {attempt}: empty series")
                 break
             if attempt < _ATTEMPTS:
-                _sleep_before_retry(attempt)
+                retry.sleep_before_retry(attempt)
 
     raise RuntimeError(
         f"no provider returned data for {name!r}. Attempts:\n  "
         + "\n  ".join(failures)
     )
-
-
-def _sleep_before_retry(attempt: int) -> None:
-    """Exponential backoff with jitter.
-
-    The jitter matters more than it looks: all three series are fetched in
-    the same second from the same provider, so without it they retry in
-    lockstep and hit a rate limit together every time.
-    """
-    delay = _BACKOFF * 2 ** (attempt - 1)
-    time.sleep(delay * (1 + random.uniform(-_JITTER, _JITTER)))
 
 
 def _yahoo(symbol: str, window: str = _FULL_RANGE) -> pd.Series:

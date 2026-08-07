@@ -16,6 +16,7 @@ import requests
 
 from ..config import CBS_BASE, CBS_TABLE, RAW
 from . import cache as cache_policy
+from . import retry
 
 _TIMEOUT = 60
 
@@ -62,7 +63,7 @@ def fetch(force: bool = False) -> pd.DataFrame:
         return pd.read_parquet(cache)
 
     try:
-        df = _download()
+        df = retry.with_retries(_download, describe="CBS download")
     except Exception as exc:  # noqa: BLE001 - a recent table beats no table
         # Stale prices are still real prices, and the age of the newest one
         # is carried through to the UI as `staleness_days`. Failing here

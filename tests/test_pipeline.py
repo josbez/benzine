@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from benzine import pipeline  # noqa: E402
 from benzine.features import build_panel  # noqa: E402
 from benzine.sources import cache as cache_policy  # noqa: E402
-from benzine.sources import cbs, excise, gla, market, synthetic  # noqa: E402
+from benzine.sources import cbs, excise, gla, market, retry, synthetic  # noqa: E402
 from benzine.sources.cbs import publication_date  # noqa: E402
 
 
@@ -223,7 +223,7 @@ class TestMarketProviders:
     def _no_waiting(self, monkeypatch):
         """Record the backoff instead of sleeping through it."""
         self.slept = []
-        monkeypatch.setattr(market.time, "sleep", self.slept.append)
+        monkeypatch.setattr(retry.time, "sleep", self.slept.append)
 
     def test_falls_back_when_the_first_provider_fails(self, monkeypatch):
         monkeypatch.setattr(
@@ -275,8 +275,8 @@ class TestMarketProviders:
 
         assert len(self.slept) == market._ATTEMPTS - 1
         for i, waited in enumerate(self.slept):
-            base = market._BACKOFF * 2**i
-            assert base * (1 - market._JITTER) <= waited <= base * (1 + market._JITTER)
+            base = retry.BACKOFF * 2**i
+            assert base * (1 - retry.JITTER) <= waited <= base * (1 + retry.JITTER)
 
     def test_an_empty_answer_moves_on_instead_of_retrying(self, monkeypatch):
         """A blocked symbol answers empty every time; retrying only delays
@@ -490,6 +490,25 @@ class TestCbsCacheFallback:
         )
         with pytest.raises(RuntimeError, match="CBS unreachable"):
             cbs.fetch()
+
+    def test_a_transient_failure_is_retried(self, tmp_path, monkeypatch):
+        """The weekly backtest died on `[Errno 101] Network is unreachable`
+        against a host it had reached two hours earlier. The market feeds
+        had retries by then; CBS did not."""
+        monkeypatch.setattr(cbs, "RAW", tmp_path)
+        monkeypatch.setattr(retry.time, "sleep", lambda _: None)
+        calls = []
+
+        def flaky():
+            calls.append(1)
+            if len(calls) < 2:
+                raise ConnectionError("Network is unreachable")
+            pump, _ = synthetic.generate(start="2024-01-01", end="2024-03-01")
+            return pump
+
+        monkeypatch.setattr(cbs, "_download", flaky)
+        assert not cbs.fetch().empty
+        assert len(calls) == 2
 
 
 class TestDegradedInputs:
