@@ -3,7 +3,6 @@
  */
 
 const DOW = ['zo', 'ma', 'di', 'wo', 'do', 'vr', 'za'];
-const MONTHS_SHORT = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
 
 const fmtPrice = (v) => '€ ' + v.toFixed(3).replace('.', ',');
 
@@ -19,15 +18,22 @@ function parseDate(s) {
 }
 
 function formatDateDutch(date) {
-  return `${date.getUTCDate()} ${MONTHS_SHORT[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
+  const dd = String(date.getUTCDate()).padStart(2, '0');
+  const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
+  return `${dd}/${mm}/${date.getUTCFullYear()}`;
 }
 
-// Relative label vs. real today's date (not vs. the freshest data point --
-// staleness is already surfaced elsewhere, this should read like a calendar).
-function relativeDayLabel(date) {
+// Days between real today and `date` (positive = in the past), not vs. the
+// freshest data point -- staleness is already surfaced elsewhere, this
+// should read like a calendar.
+function daysFromToday(date) {
   const today = new Date();
   const todayUTC = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
-  const diffDays = Math.round((todayUTC - date.getTime()) / 86400000);
+  return Math.round((todayUTC - date.getTime()) / 86400000);
+}
+
+function relativeDayLabel(date) {
+  const diffDays = daysFromToday(date);
   if (diffDays === 0) return 'Vandaag';
   if (diffDays === 1) return 'Gisteren';
   if (diffDays > 1) return `${diffDays} dagen geleden`;

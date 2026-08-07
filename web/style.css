@@ -412,6 +412,42 @@ h1, .h1 {
 
 /* --- chart ----------------------------------------------------------- */
 
+.chart-head {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.chart-head .eyebrow { margin: 0; }
+
+@media (min-width: 480px) {
+  .chart-head { flex-direction: row; align-items: center; justify-content: space-between; }
+}
+
+.chart-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.range-select-inline {
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: var(--primary);
+  background: transparent;
+  border: none;
+  border-bottom: 1px dashed var(--primary);
+  padding: 0 0 1px;
+  cursor: pointer;
+}
+
+.range-select-inline:focus {
+  outline: none;
+  border-bottom-style: solid;
+}
+
 .chart-shell { position: relative; }
 
 svg.chart {
@@ -650,10 +686,12 @@ tbody tr:last-child td { border-bottom: none; }
 /* --- buttons ------------------------------------------------------------ */
 
 .btn {
+  display: inline-block;
   font-family: var(--font-mono);
   font-size: 0.8125rem;
   font-weight: 600;
   letter-spacing: 0.03em;
+  text-decoration: none;
   border-radius: var(--radius);
   padding: 10px 20px;
   border: none;
@@ -702,6 +740,17 @@ tbody tr:last-child td { border-bottom: none; }
   .history-head { flex-direction: row; align-items: center; justify-content: space-between; }
 }
 
+.history-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+@media (min-width: 768px) {
+  .history-filters { flex-direction: row; width: auto; }
+}
+
 .search-field {
   position: relative;
   width: 100%;
@@ -709,6 +758,28 @@ tbody tr:last-child td { border-bottom: none; }
 
 @media (min-width: 768px) {
   .search-field { width: 320px; }
+}
+
+.range-select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius);
+  background: var(--surface-container-lowest);
+  color: var(--on-surface);
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+@media (min-width: 768px) {
+  .range-select { width: 180px; }
+}
+
+.range-select:focus {
+  outline: none;
+  border-color: var(--primary);
+  border-width: 2px;
 }
 
 .search-field svg {
@@ -764,6 +835,15 @@ tbody tr:last-child td { border-bottom: none; }
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.history-entry.is-today {
+  border: 2px solid var(--primary);
+  background: var(--surface-container);
+}
+
+.history-entry.is-today .history-entry-rel {
+  color: var(--primary);
 }
 
 .history-entry-head {
