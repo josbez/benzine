@@ -28,6 +28,19 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      # Shares the forecast job's download caches (same key prefix), which
+      # run several times a day, so this job normally starts with a table
+      # that is hours old. That is what turns an unreachable CBS from a
+      # failed run into a slightly stale one -- which is what happened on
+      # 7 August, on a runner that had reached the same host two hours
+      # earlier.
+      - name: Restore source caches
+        uses: actions/cache/restore@v4
+        with:
+          path: data/raw/*.parquet
+          key: source-caches-${{ github.run_id }}
+          restore-keys: source-caches-
+
       - run: pip install -r requirements.txt
 
       - name: Run tests

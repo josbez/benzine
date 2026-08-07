@@ -16,14 +16,17 @@ import requests
 
 from ..config import CBS_BASE, CBS_TABLE, RAW
 from . import cache as cache_policy
+from . import retry
 
 _TIMEOUT = 60
 
-# CBS releases weekly, so a cache written today holds everything published.
-# Anything older gets re-downloaded: a cache that never expires turns a
-# local run into a run against whatever prices happened to be current the
-# first time the table was fetched.
-_MAX_CACHE_AGE = dt.timedelta(hours=12)
+# Longer than the market cache on purpose. CBS releases once a week, so
+# re-downloading the whole table on every one of the day's runs would be
+# three times the traffic for the same numbers; eight hours still picks
+# the Thursday morning release up within the same morning. What this must
+# not be is never: a cache with no expiry turns a local run into a run
+# against whatever prices happened to be current the first time.
+_MAX_CACHE_AGE = dt.timedelta(hours=8)
 
 # How stale the cache may be before a failed refresh becomes a hard error
 # rather than a fallback. One CBS release cycle: past this we would be
@@ -60,7 +63,7 @@ def fetch(force: bool = False) -> pd.DataFrame:
         return pd.read_parquet(cache)
 
     try:
-        df = _download()
+        df = retry.with_retries(_download, describe="CBS download")
     except Exception as exc:  # noqa: BLE001 - a recent table beats no table
         # Stale prices are still real prices, and the age of the newest one
         # is carried through to the UI as `staleness_days`. Failing here
