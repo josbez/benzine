@@ -727,25 +727,27 @@ class TestCrudeFeatures:
         expected = mk.loc[row["date"], "rbob_eur_l"] - mk.loc[row["date"], "brent_eur_l"]
         assert row["crack"] == pytest.approx(expected)
 
-    def test_crude_features_are_present_for_every_window(self, panel):
-        from benzine.features import _MARKET_WINDOWS, feature_columns
+    def test_only_the_crack_reaches_the_model(self, panel):
+        """Crude *changes* were measured and dropped: they duplicated the
+        gasoline features and cost 3 points of skill at five days. Keeping
+        that decision visible here so it is not silently re-added."""
+        from benzine.features import feature_columns
 
         cols = feature_columns(panel, horizon=1)
-        for w in _MARKET_WINDOWS:
-            assert f"crude_chg_{w}d" in cols
-        assert "crude_since_anchor" in cols
+        assert "crack" in cols
         assert "crack_dev" in cols
+        assert not [c for c in cols if c.startswith("crude_")]
 
     def test_crude_carries_information_gasoline_does_not(self, panel):
         """Guards the generator as much as the features.
 
-        Before this change the synthetic Brent was an exact affine
-        function of the gasoline series, so every crude feature was a
-        rescaled copy of an existing one and no test here could have
-        failed. If that regresses, this catches it.
+        Before August 2026 the synthetic Brent was an exact affine
+        function of the gasoline series, which made the crack a rescaled
+        copy of the gasoline price and no test here could have failed.
+        If that regresses, this catches it.
         """
-        assert abs(panel["crude_chg_7d"].corr(panel["mkt_chg_7d"])) < 0.99
         assert panel["crack"].std() > 0.001
+        assert abs(panel["crack"].corr(panel["margin"])) < 0.99
 
     def test_a_crude_spike_moves_the_crude_features_only(self):
         """The distinction the features exist to make: a barrel that got
@@ -764,10 +766,16 @@ class TestCrudeFeatures:
         # one-day change carries it. By the next day it is in both terms.
         row = (base["date"] == pd.Timestamp("2020-06-01")).values
 
-        assert after.loc[row, "crude_chg_1d"].iloc[0] > 0.09
+        # A pure crude event leaves the crack alone -- that is the whole
+        # point of measuring the difference rather than either series.
         assert after.loc[row, "crack"].iloc[0] == pytest.approx(
             base.loc[row, "crack"].iloc[0]
         )
+        # ...while a refining-margin event moves it.
+        widened = market.copy()
+        widened.loc[day, "rbob_eur_l"] += 0.10
+        crack_after = build_panel(pump, widened).loc[row, "crack"].iloc[0]
+        assert crack_after - base.loc[row, "crack"].iloc[0] == pytest.approx(0.10)
 
 
 class TestAdvisoryAnchor:

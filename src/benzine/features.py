@@ -215,33 +215,31 @@ def _add_crude_features(panel: pd.DataFrame, mk: pd.DataFrame) -> None:
     second cost anchor: the cost base in `_add_cost_gap` stays the refined
     series, because that is what a Dutch retailer actually buys.
 
-    Two things crude adds that the gasoline series alone does not:
+    What crude adds is the **crack spread**: whether a gasoline move will
+    hold. A move that sits only in the crack is a refining-margin story
+    and tends to unwind within weeks; a crude-driven move does not. Same
+    size at the wholesale end, different pass-through at the pump.
 
-      * A supply shock -- a strait threatened, an OPEC decision -- lands in
-        crude first and most cleanly. The gasoline contract carries it too,
-        mixed with refinery outages, blend-season switches and US driving
-        demand that have nothing to do with a Rotterdam barge.
-      * The crack spread says whether a gasoline move will hold. A move
-        that is only in the crack is a refining-margin story and tends to
-        unwind within weeks; a crude-driven move does not. Same size at the
-        wholesale end, different pass-through at the pump.
+    Only the crack, deliberately. Crude *changes* were tried too -- the
+    same windows as the gasoline series, plus the move since the anchor --
+    and they made the model worse: skill at five days fell from 14.1% to
+    11.0% on five years of CBS data, degrading with horizon, which is what
+    overfitting looks like. In hindsight that is the expected result.
+    Crude and refined gasoline move together on almost every day, so those
+    columns were near-duplicates of features the model already had, and
+    the extra ways to fit noise cost more than the signal they added. The
+    crack is the one piece that is genuinely orthogonal: it is the
+    *difference* between the two series, which is exactly the part the
+    gasoline price alone cannot tell you.
 
-    Deliberately no up/down split here, unlike the pump-side features:
-    "rockets and feathers" is *retail* behaviour, and the crude-to-product
-    leg is fast and close to symmetric.
+    No up/down split here, unlike the pump-side features: "rockets and
+    feathers" is *retail* behaviour, and the crude-to-product leg is fast
+    and close to symmetric.
     """
     brent = mk["brent_eur_l"]
     rbob = mk["rbob_eur_l"]
     idx = panel["date"]
 
-    for w in _MARKET_WINDOWS:
-        panel[f"crude_chg_{w}d"] = (brent - brent.shift(w)).reindex(idx).to_numpy()
-
-    brent_at_anchor = brent.reindex(panel["anchor_date"]).to_numpy()
-    panel["crude_since_anchor"] = brent.reindex(idx).to_numpy() - brent_at_anchor
-
-    # The refining margin itself: what a litre of finished gasoline costs
-    # over the crude inside it.
     crack = (rbob - brent).reindex(idx)
     panel["crack"] = crack.to_numpy()
     panel["crack_dev"] = (
