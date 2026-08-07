@@ -1,11 +1,22 @@
 name: Daily forecast
 
-# Advisory prices for the coming day are published the evening before, and
-# CBS releases on Thursday mornings, so an early-morning run picks up both.
-# 05:00 UTC is 06:00 CET / 07:00 CEST.
+# Three times a day, at 03:00, 12:00 and 17:00 Dutch time.
+#
+# Cron here is UTC and GitHub does not do daylight saving, so these are
+# set for CEST (UTC+2). Through the winter they land an hour earlier in
+# local terms -- 02:00, 11:00, 16:00 -- which changes nothing that
+# matters: advisory prices for the coming day are published the evening
+# before, and CBS releases on Thursday mornings, so the first run of the
+# day picks up both either way.
+#
+# The later two runs exist for the wholesale side. RBOB and Brent trade
+# through the afternoon, so the midday and late runs see the day's move
+# rather than yesterday's close. That is also why the source caches
+# expire in hours rather than half a day: with a 12-hour cache the extra
+# runs would republish an identical forecast.
 on:
   schedule:
-    - cron: "0 5 * * *"
+    - cron: "0 1,10,15 * * *"
   workflow_dispatch:
   push:
     branches: [main]
