@@ -92,6 +92,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # The probe answers the question the snapshot log raises: if the
+          # price is not in the page text, where is it? It runs here rather
+          # than being left to a human because it needs to reach the live
+          # page, which is exactly what a laptop debugging this often
+          # cannot do. It must never turn a scraper failure into a job
+          # failure, hence the `|| true`.
+          make probe > "$RUNNER_TEMP/probe.log" 2>&1 || true
+
           {
             echo "The daily run could not read today's Euro 95 advisory price"
             echo "from UnitedConsumers. The forecast falls back to the CBS"
@@ -99,15 +107,31 @@ jobs:
             echo
             echo "Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
             echo
+            echo "<details><summary>Scrape error</summary>"
+            echo
             echo '```'
-            tail -c 6000 "$RUNNER_TEMP/snapshot.log"
+            tail -c 4000 "$RUNNER_TEMP/snapshot.log"
+            echo '```'
+            echo
+            echo "</details>"
+            echo
+            echo "### Where the price actually is"
+            echo
+            echo '```'
+            tail -c 8000 "$RUNNER_TEMP/probe.log"
             echo '```'
           } > "$RUNNER_TEMP/issue.md"
 
+          # Edit the existing issue rather than commenting on it. A scraper
+          # that stays broken for a fortnight would otherwise leave a
+          # fortnight of near-identical comments, which is how a signal
+          # turns back into noise. The body always shows the latest run;
+          # closing the issue after a fix means the next break opens a new
+          # one, and that is what notifies.
           existing=$(gh issue list --label scraper --state open \
             --json number --jq '.[0].number')
           if [ -n "$existing" ]; then
-            gh issue comment "$existing" --body-file "$RUNNER_TEMP/issue.md"
+            gh issue edit "$existing" --body-file "$RUNNER_TEMP/issue.md"
           else
             gh label create scraper --color d93f0b \
               --description "The advisory-price scraper needs attention" \
