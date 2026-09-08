@@ -14,9 +14,9 @@
 # cost of a toolchain to regenerate it; the breakages seen so far have all
 # been in this list.
 pandas==3.0.5
-numpy==2.5.1
+numpy==2.5.2
 scikit-learn==1.9.0
 requests==2.34.2
 PyYAML==6.0.3
-pyarrow==25.0.0   # pandas needs it for the parquet caches
+pyarrow==25.0.1   # pandas needs it for the parquet caches
 pytest==9.1.1     # the workflows run the test suite
