@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Benzineprijs verwachting</title>
+<meta name="description" content="Verwachting van de landelijke Euro 95 pompprijs voor de komende 5 dagen.">
+<meta name="theme-color" content="#faf9f6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#202221" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>⛽</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Space+Mono:wght@700&family=Work+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="wordmark" href="index.html">Forecaster</a>
+      <nav class="topnav" aria-label="Hoofdnavigatie">
+        <a class="topnav-link is-active" href="index.html">Voorspelling</a>
+        <a class="topnav-link" href="history.html">Geschiedenis</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="content">
+
+    <div class="page-head">
+      <h1>Benzineprijs verwachting</h1>
+      <p class="sub" id="fuel-line">Euro 95 (E10) &middot; landelijk gemiddelde</p>
+    </div>
+
+    <div id="banner-slot"></div>
+
+    <div class="grid" id="app-grid">
+      <div class="col-main">
+
+        <section class="card price-board" id="price-board">
+          <div class="price-board-head">
+            <span class="eyebrow" id="anchor-label">Laatst gemeten prijs</span>
+            <span class="chip" id="trend-chip"></span>
+          </div>
+          <div class="price-value">
+            <span class="price-currency">&euro;</span>
+            <span class="price-amount" id="hero">&mdash;</span>
+            <span class="price-unit">/l</span>
+          </div>
+          <p class="price-meta" id="anchor-meta"></p>
+        </section>
+
+        <section class="card">
+          <div class="chart-head">
+            <h2 class="eyebrow chart-title">
+              Komende
+              <select id="chart-range" class="range-select-inline" aria-label="Periode">
+                <option value="5" selected>5 dagen</option>
+                <option value="30">1 maand</option>
+                <option value="90">3 maanden</option>
+              </select>
+            </h2>
+            <a class="btn btn-outline" href="history.html">Geschiedenis</a>
+          </div>
+          <div class="chart-shell">
+            <svg class="chart" id="chart" role="img"
+                 aria-label="Benzineprijs van de afgelopen weken en de verwachting voor de komende vijf dagen, met onzekerheidsband."></svg>
+            <div class="tooltip" id="tooltip" hidden></div>
+          </div>
+          <div class="legend">
+            <span><i class="key"></i>gemeten</span>
+            <span><i class="key dashed"></i>verwacht</span>
+            <span><i class="key band"></i>80% kans&shy;interval</span>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2 class="eyebrow">Per dag</h2>
+          <div class="days" id="days"></div>
+          <p class="note" id="days-note"></p>
+        </section>
+
+      </div>
+      <div class="col-side">
+
+        <aside class="card wood">
+          <h2 class="eyebrow">Waar dit op gebaseerd is</h2>
+          <ul class="drivers" id="drivers"></ul>
+        </aside>
+
+        <aside class="card">
+          <h2 class="eyebrow">Hoe goed was dit model?</h2>
+          <div class="table-scroll">
+            <table id="skill-table">
+              <thead>
+                <tr><th>Vooruit</th><th>Afwijking</th><th>Na&iuml;ef</th><th>Beter</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <p class="note" id="skill-note"></p>
+        </aside>
+
+      </div>
+    </div>
+
+    <p class="footer" id="footer"></p>
+
+  </main>
+
+  <nav class="bottomnav" aria-label="Hoofdnavigatie">
+    <a class="bottomnav-link is-active" href="index.html">
+      <span id="nav-icon-forecast"></span>
+      <span>Voorspelling</span>
+    </a>
+    <a class="bottomnav-link" href="history.html">
+      <span id="nav-icon-history"></span>
+      <span>Geschiedenis</span>
+    </a>
+  </nav>
+
+</div>
+<script src="shared.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
